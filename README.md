@@ -132,5 +132,18 @@ CUDA_VISIBLE_DEVICES=0,1 python gradio_demo.py --ip 0.0.0.0 --port 6688 --use_im
       primaryClass={cs.CV}
     }
 
+---
+
+## License
+
+This project, "Scaling Up to Excellence: Practicing Model Scaling for Photo-Realistic Image Restoration In the Wild," builds upon work originally licensed under the MIT License. Modifications and additional contributions made in this fork are licensed under the GNU Affero General Public License (AGPL). This dual licensing approach allows users to choose which license to comply with, as follows:
+
+- The original code from the upstream repository remains under the MIT License. See [LICENSE](https://github.com/Fanghua-Yu/SUPIR/blob/main/LICENSE) for the MIT License terms.
+- Modifications and contributions made by FurkanGozukara and any subsequent contributions to this fork are under the AGPL. For more details on the AGPL and its terms, please see [LICENSE_AGPL.md](https://github.com/Fanghua-Yu/SUPIR/blob/main/LICENSE_AGPL.md).
+
+This dual-licensing model is designed to ensure that contributions and modifications made to this project remain free and open, in accordance with the principles of the AGPL, while respecting the open-source nature of the original work under the MIT License.
+
+---
+
 ## 📧 Contact
 If you have any question, please email `fanghuayu96@gmail.com`.
