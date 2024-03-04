@@ -527,7 +527,7 @@ By using this service, users are required to agree to the following terms: The s
 The service is a research preview intended for non-commercial use only, subject to the model [License](https://github.com/Fanghua-Yu/SUPIR) of SUPIR.
 """
 
-block = gr.Blocks(title='SUPIR').queue()
+block = gr.Blocks(title='SUPIR',theme=args.theme).queue()
 with block:
     with gr.Tab("Main Upscale"):
         with gr.Row():
@@ -697,6 +697,6 @@ with block:
     batch_upscale_stop_button.click(fn=stop_batch_upscale, show_progress=True, queue=True)
 
 if args.port is not None:  # Check if the --port argument is provided
-    block.launch(server_name=server_ip, server_port=args.port, share=args.share, inbrowser=True, theme=args.theme)
+    block.launch(server_name=server_ip, server_port=args.port, share=args.share, inbrowser=True)
 else:
-    block.launch(server_name=server_ip, share=args.share, inbrowser=True, theme=args.theme)
+    block.launch(server_name=server_ip, share=args.share, inbrowser=True)
