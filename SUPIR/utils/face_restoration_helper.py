@@ -116,6 +116,12 @@ class FaceRestoreHelper(object):
         self.use_parse = use_parse
         self.face_parse = init_parsing_model(model_name='parsenet', device=self.device)
 
+    def to(self, device):
+        self.device = device
+        self.face_detector = self.face_detector.to(device)
+        self.face_parse = self.face_parse.to(device)
+        return self
+
     def set_upscale_factor(self, upscale_factor):
         self.upscale_factor = upscale_factor
 

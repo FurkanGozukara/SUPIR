@@ -101,6 +101,12 @@ class LLavaAgent:
             img_captions.append(output)
         return img_captions
 
+    def to(self, device):
+        self.device = device
+        self.model.to(device)
+        self.input_ids = self.input_ids.to(device)
+        return self
+
 
 if __name__ == '__main__':
     llava_agent = LLavaAgent("/opt/data/private/AIGC_pretrain/LLaVA1.5/llava-v1.5-13b")

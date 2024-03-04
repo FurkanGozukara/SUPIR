@@ -31,26 +31,30 @@ def create_model(config_path):
     return model
 
 
-def create_SUPIR_model(config_path, SUPIR_sign=None):
+def create_SUPIR_model(config_path, supir_sign=None, device='cpu'):
     config = OmegaConf.load(config_path)
-    model = instantiate_from_config(config.model).cpu()
-    print(f'Loaded model config from [{config_path}]')
+    model = instantiate_from_config(config.model)
+    # Move model to the specified device
+    model = model.to(device)
+    print(f'Loaded model config from [{config_path}] and moved to {device}')
+
     if config.SDXL_CKPT is not None:
         model.load_state_dict(load_state_dict(config.SDXL_CKPT), strict=False)
     if config.SUPIR_CKPT is not None:
         model.load_state_dict(load_state_dict(config.SUPIR_CKPT), strict=False)
-    if SUPIR_sign is not None:
-        assert SUPIR_sign in ['F', 'Q']
-        if SUPIR_sign == 'F':
+    if supir_sign is not None:
+        assert supir_sign in ['F', 'Q']
+        if supir_sign == 'F':
             model.load_state_dict(load_state_dict(config.SUPIR_CKPT_F), strict=False)
-        elif SUPIR_sign == 'Q':
+        elif supir_sign == 'Q':
             model.load_state_dict(load_state_dict(config.SUPIR_CKPT_Q), strict=False)
     return model
 
-def load_QF_ckpt(config_path):
+def load_QF_ckpt(config_path, device='cpu'):
     config = OmegaConf.load(config_path)
-    ckpt_F = torch.load(config.SUPIR_CKPT_F, map_location='cpu')
-    ckpt_Q = torch.load(config.SUPIR_CKPT_Q, map_location='cpu')
+    # Load checkpoints to the specified device
+    ckpt_F = torch.load(config.SUPIR_CKPT_F, map_location=device)
+    ckpt_Q = torch.load(config.SUPIR_CKPT_Q, map_location=device)
     return ckpt_Q, ckpt_F
 
 
