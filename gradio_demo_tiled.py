@@ -45,7 +45,7 @@ else:
 # load SUPIR
 config_path = 'options/SUPIR_v0_tiled.yaml'
 config = OmegaConf.load(config_path)
-model = create_SUPIR_model(config_path, SUPIR_sign='Q')
+model = create_SUPIR_model(config_path, supir_sign='Q')
 if args.loading_half_params:
     model = model.half()
 if args.use_tile_vae:
