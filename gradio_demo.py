@@ -80,6 +80,9 @@ models_loaded = False
 
 status_container = StatusContainer()
 
+def refresh_models_click():
+    new_model_list = list_models()
+    return gr.update(choices=new_model_list)
 
 def list_models():
     model_dir = args.ckpt_dir
@@ -122,13 +125,22 @@ def load_face_helper():
             det_model='retinaface_resnet50'
         )
 
+last_used_checkpoint = None
 
 def load_model(selected_model, selected_checkpoint, progress=None):
-    global model
+    global model, last_used_checkpoint
+    checkpoint_use = args.ckpt
+    if selected_checkpoint:
+        checkpoint_use = os.path.join(args.ckpt_dir, selected_checkpoint)
+        if last_used_checkpoint is None:
+            last_used_checkpoint = checkpoint_use
+
+    if last_used_checkpoint != checkpoint_use:
+        model = None
+        torch.cuda.empty_cache()
+        last_used_checkpoint = checkpoint_use
+    
     if model is None:
-        checkpoint_use = args.ckpt
-        if selected_checkpoint:
-            checkpoint_use = os.path.join(args.ckpt_dir, selected_checkpoint)
         if progress is not None:
             progress(1 / 2, desc="Loading SUPIR...")
         model = create_SUPIR_model('options/SUPIR_v0.yaml', supir_sign='Q', device='cpu',
@@ -973,8 +985,12 @@ with block:
                         with gr.Column():
                             apply_stage_2_checkbox = gr.Checkbox(label="Apply Stage 2", value=True)
                     show_select = args.ckpt_browser
-                    ckpt_select_dropdown = gr.Dropdown(label="Model", choices=list_models(), value=selected_model(),
+                    with gr.Row():
+                        with gr.Column(scale=2):
+                            ckpt_select_dropdown = gr.Dropdown(label="Model", choices=list_models(), value=selected_model(),
                                                        interactive=True)
+                            refresh_models = gr.Button(value="Refresh Models List")
+                            refresh_models.click(fn=refresh_models_click, outputs=[ckpt_select_dropdown])
                     upscale_slider = gr.Slider(label="Upscale Size (Stage 2)", minimum=1, maximum=8, value=1, step=0.1)
                     prompt_textbox = gr.Textbox(label="Prompt", value="")
                     face_prompt_textbox = gr.Textbox(label="Face Prompt",
@@ -1096,7 +1112,7 @@ with block:
     with gr.Tab("Restored Faces"):
         with gr.Row():
             face_gallery = gr.Gallery(label='Faces', show_label=False, elem_id="gallery2")
-    with gr.Tab("About_V26"):
+    with gr.Tab("About_V28"):
         gr.Markdown(title_md)
         with gr.Row():
             gr.Markdown(claim_md)
