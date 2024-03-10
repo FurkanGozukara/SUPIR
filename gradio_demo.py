@@ -26,6 +26,7 @@ from SUPIR.utils.face_restoration_helper import FaceRestoreHelper
 from SUPIR.utils.model_fetch import get_model
 from SUPIR.utils.status_container import StatusContainer
 from llava.llava_agent import LLavaAgent
+from CKPT_PTH import setModelPath
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--ip", type=str, default='127.0.0.1')
@@ -51,13 +52,17 @@ args = parser.parse_args()
 
 server_ip = args.ip
 use_llava = not args.no_llava
+model_folder = None
 if args.debug:
     args.open_browser = False
 
-if args.ckpt_dir == "models/checkpoints":
-    args.ckpt_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
+if args.ckpt_dir is not None:
+    args.ckpt_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir, 'checkpoints')
     if not os.path.exists(args.ckpt_dir):
         os.makedirs(args.ckpt_dir, exist_ok=True)
+    model_folder = os.path.split(args.ckpt_dir)[0]
+
+setModelPath(model_folder)
 
 if torch.cuda.device_count() >= 2:
     SUPIR_device = 'cuda:0'

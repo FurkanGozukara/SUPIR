@@ -33,7 +33,7 @@ from ...util import (
     instantiate_from_config,
 )
 
-from CKPT_PTH import SDXL_CLIP1_PATH, SDXL_CLIP2_CKPT_PTH
+import CKPT_PTH  #import SDXL_CLIP1_PATH, SDXL_CLIP2_CKPT_PTH
 
 class AbstractEmbModel(nn.Module):
     def __init__(self):
@@ -456,7 +456,7 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
     ):  # clip-vit-base-patch32
         super().__init__()
         assert layer in self.LAYERS
-        model_file = get_model(SDXL_CLIP1_PATH)
+        model_file = get_model(CKPT_PTH.SDXL_CLIP1_PATH)
         self.tokenizer = CLIPTokenizer.from_pretrained(model_file)
         self.transformer = CLIPTextModel.from_pretrained(model_file)
         self.device = device
@@ -525,7 +525,7 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     ):
         super().__init__()
         assert layer in self.LAYERS
-        model_path = get_model(SDXL_CLIP2_CKPT_PTH)
+        model_path = get_model(CKPT_PTH.SDXL_CLIP2_CKPT_PTH)
         model, _, _ = open_clip.create_model_and_transforms(
             arch,
             device=torch.device("cpu"),
