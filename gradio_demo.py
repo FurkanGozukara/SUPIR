@@ -43,7 +43,7 @@ parser.add_argument("--load_8bit_llava", action='store_true', default=False)
 parser.add_argument("--load_4bit_llava", action='store_true', default=True)
 parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
 parser.add_argument("--ckpt_browser", action='store_true', default=True)
-parser.add_argument("--ckpt_dir", type=str, default='models/checkpoints')
+parser.add_argument("--ckpt_dir", type=str, default='models')
 parser.add_argument("--theme", type=str, default='default')
 parser.add_argument("--open_browser", action='store_true', default=True)
 parser.add_argument("--outputs_folder", type=str, default='outputs')
@@ -60,7 +60,8 @@ if args.ckpt_dir is not None:
     args.ckpt_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir, 'checkpoints')
     if not os.path.exists(args.ckpt_dir):
         os.makedirs(args.ckpt_dir, exist_ok=True)
-    model_folder = os.path.split(args.ckpt_dir)[0]
+
+model_folder = os.path.split(args.ckpt_dir)[0]
 
 setModelPath(model_folder)
 
@@ -129,7 +130,7 @@ last_used_checkpoint = None
 
 def load_model(selected_model, selected_checkpoint, progress=None):
     global model, last_used_checkpoint
-    checkpoint_use = args.ckpt
+    checkpoint_use = os.path.join(args.ckpt_dir, args.ckpt)
     if selected_checkpoint:
         checkpoint_use = os.path.join(args.ckpt_dir, selected_checkpoint)
         if last_used_checkpoint is None:
@@ -144,7 +145,7 @@ def load_model(selected_model, selected_checkpoint, progress=None):
         if progress is not None:
             progress(1 / 2, desc="Loading SUPIR...")
         model = create_SUPIR_model('options/SUPIR_v0.yaml', supir_sign='Q', device='cpu',
-                                   ckpt=checkpoint_use)
+                                   ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use)
         if args.loading_half_params:
             model = model.half()
         if args.use_tile_vae:

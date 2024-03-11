@@ -31,7 +31,7 @@ def create_model(config_path):
     return model
 
 
-def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt=None):
+def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt_dir=None, ckpt=None):
     config = OmegaConf.load(config_path)
     if ckpt:
         config.SDXL_CKPT = ckpt
@@ -43,20 +43,18 @@ def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt=None):
     if config.SDXL_CKPT is not None:
         model.load_state_dict(load_state_dict(config.SDXL_CKPT), strict=False)
     if config.SUPIR_CKPT is not None:
-        model.load_state_dict(load_state_dict(config.SUPIR_CKPT), strict=False)
+        model.load_state_dict(load_state_dict(os.path.join(ckpt_dir, config.SUPIR_CKPT)), strict=False)
     if supir_sign is not None:
         assert supir_sign in ['F', 'Q']
-        if supir_sign == 'F':
-            if not os.path.exists(config.SUPIR_CKPT_F):
-                full_path = os.path.abspath(os.path.join("..", "models", "SUPIR-v0F.ckpt"))
-                if os.path.exists(full_path):
-                    config.SUPIR_CKPT_F = full_path
+        if supir_sign == 'F':            
+            full_path = os.path.join(ckpt_dir, config.SUPIR_CKPT_F)
+            if os.path.exists(full_path):
+                config.SUPIR_CKPT_F = full_path
             model.load_state_dict(load_state_dict(config.SUPIR_CKPT_F), strict=False)
         elif supir_sign == 'Q':
-            if not os.path.exists(config.SUPIR_CKPT_Q):
-                full_path = os.path.abspath(os.path.join("..", "models", "SUPIR-v0Q.ckpt"))
-                if os.path.exists(full_path):
-                    config.SUPIR_CKPT_Q = full_path
+            full_path = os.path.join(ckpt_dir, config.SUPIR_CKPT_Q)
+            if os.path.exists(full_path):
+                config.SUPIR_CKPT_Q = full_path
             model.load_state_dict(load_state_dict(config.SUPIR_CKPT_Q), strict=False)
     return model
 

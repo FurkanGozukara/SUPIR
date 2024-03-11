@@ -42,9 +42,9 @@ def download_file(url, folder_path, file_name=None):
 # Define the folders and their corresponding file URLs with optional file names
 folders_and_files = {
     os.path.join('models'): [
-        ('https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/resolve/main/open_clip_pytorch_model.bin', None),
         ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0F.ckpt', 'v0F.ckpt'),
-        ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0Q.ckpt', 'v0Q.ckpt')
+        ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0Q.ckpt', 'v0Q.ckpt'),
+        ('https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/resolve/main/open_clip_pytorch_model.bin', None)
     ]
 }
 
