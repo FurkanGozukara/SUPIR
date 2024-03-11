@@ -6,8 +6,8 @@ from PIL import Image
 from torch.nn.functional import interpolate
 from omegaconf import OmegaConf
 from sgm.util import instantiate_from_config
-
-
+from SUPIR.utils.model_fetch import get_model
+import CKPT_PTH 
 def get_state_dict(d):
     return d.get('state_dict', d)
 
@@ -15,7 +15,7 @@ def get_state_dict(d):
 def load_state_dict(ckpt_path, location='cpu'):
     _, extension = os.path.splitext(ckpt_path)
     if extension.lower() == ".safetensors":
-        import safetensors.torch
+        import safetensors.torch        
         state_dict = safetensors.torch.load_file(ckpt_path, device=location)
     else:
         state_dict = get_state_dict(torch.load(ckpt_path, map_location=torch.device(location)))
@@ -40,29 +40,26 @@ def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt_dir=None
     model = model.to(device)
     print(f'Loaded model config from [{config_path}] and moved to {device}')
 
-    if config.SDXL_CKPT is not None:
+    if config.SDXL_CKPT is not None:        
         model.load_state_dict(load_state_dict(config.SDXL_CKPT), strict=False)
     if config.SUPIR_CKPT is not None:
-        model.load_state_dict(load_state_dict(os.path.join(ckpt_dir, config.SUPIR_CKPT)), strict=False)
+        model_file = get_model(os.path.join(ckpt_dir, config.SUPIR_CKPT))
+        model.load_state_dict(load_state_dict(model_file), strict=False)
     if supir_sign is not None:
         assert supir_sign in ['F', 'Q']
         if supir_sign == 'F':            
-            full_path = os.path.join(ckpt_dir, config.SUPIR_CKPT_F)
-            if os.path.exists(full_path):
-                config.SUPIR_CKPT_F = full_path
-            model.load_state_dict(load_state_dict(config.SUPIR_CKPT_F), strict=False)
+            model_file = get_model(CKPT_PTH.SUPIR_CKPT_F_PTH)
+            model.load_state_dict(load_state_dict(model_file), strict=False)
         elif supir_sign == 'Q':
-            full_path = os.path.join(ckpt_dir, config.SUPIR_CKPT_Q)
-            if os.path.exists(full_path):
-                config.SUPIR_CKPT_Q = full_path
-            model.load_state_dict(load_state_dict(config.SUPIR_CKPT_Q), strict=False)
+            model_file = get_model(CKPT_PTH.SUPIR_CKPT_Q_PTH)            
+            model.load_state_dict(load_state_dict(model_file), strict=False)
     return model
 
 
 def load_QF_ckpt(config_path, device='cpu'):
     config = OmegaConf.load(config_path)
-    ckpt_F = torch.load(config.SUPIR_CKPT_F, map_location=device)
-    ckpt_Q = torch.load(config.SUPIR_CKPT_Q, map_location=device)
+    ckpt_F = torch.load(CKPT_PTH.SUPIR_CKPT_F_PTH, map_location=device)
+    ckpt_Q = torch.load(CKPT_PTH.SUPIR_CKPT_Q_PTH, map_location=device)
     return ckpt_Q, ckpt_F
 
 

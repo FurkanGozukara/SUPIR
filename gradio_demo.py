@@ -26,7 +26,7 @@ from SUPIR.utils.face_restoration_helper import FaceRestoreHelper
 from SUPIR.utils.model_fetch import get_model
 from SUPIR.utils.status_container import StatusContainer
 from llava.llava_agent import LLavaAgent
-from CKPT_PTH import setModelPath
+import CKPT_PTH
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--ip", type=str, default='127.0.0.1')
@@ -41,9 +41,10 @@ parser.add_argument("--encoder_tile_size", type=int, default=512)
 parser.add_argument("--decoder_tile_size", type=int, default=64)
 parser.add_argument("--load_8bit_llava", action='store_true', default=False)
 parser.add_argument("--load_4bit_llava", action='store_true', default=True)
-parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
+#parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
 parser.add_argument("--ckpt_browser", action='store_true', default=True)
 parser.add_argument("--ckpt_dir", type=str, default='models')
+parser.add_argument("--ckpt_dir2", type=str, default=None)
 parser.add_argument("--theme", type=str, default='default')
 parser.add_argument("--open_browser", action='store_true', default=True)
 parser.add_argument("--outputs_folder", type=str, default='outputs')
@@ -52,7 +53,9 @@ args = parser.parse_args()
 
 server_ip = args.ip
 use_llava = not args.no_llava
-model_folder = None
+model_path = None
+model_path2 = None
+
 if args.debug:
     args.open_browser = False
 
@@ -61,9 +64,13 @@ if args.ckpt_dir is not None:
     if not os.path.exists(args.ckpt_dir):
         os.makedirs(args.ckpt_dir, exist_ok=True)
 
-model_folder = os.path.split(args.ckpt_dir)[0]
+model_path = os.path.split(args.ckpt_dir)[0]
+model_path2 = model_path if args.ckpt_dir2 is None else args.ckpt_dir2
+CKPT_PTH.setModelsPath(model_path, model_path2)
 
-setModelPath(model_folder)
+#get default from repo if not exists yet
+default_sdxl_model = get_model(CKPT_PTH.DEFAULT_SDXL_PATH)
+
 
 if torch.cuda.device_count() >= 2:
     SUPIR_device = 'cuda:0'
@@ -88,17 +95,15 @@ def refresh_models_click():
 def list_models():
     model_dir = args.ckpt_dir
     output = []
+    output.append(CKPT_PTH.DEFAULT_SDXL_PATH.split('/')[-1])
+
     if os.path.exists(model_dir):
         output = [f for f in os.listdir(model_dir) if f.endswith('.safetensors') or f.endswith('.ckpt')]
     else:
         local_model_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
         if os.path.exists(local_model_dir):
             output = [f for f in os.listdir(local_model_dir) if f.endswith('.safetensors') or f.endswith('.ckpt')]
-    if os.path.exists(args.ckpt) and args.ckpt not in output:
-        output.append(args.ckpt)
-    else:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), args.ckpt)):
-            output.append(args.ckpt)
+    
     # Sort the models
     output.sort()
     return output
@@ -106,7 +111,7 @@ def list_models():
 
 def selected_model():
     models = list_models()
-    target_model = args.ckpt
+    target_model = CKPT_PTH.DEFAULT_SDXL_PATH.split('/')[-1]
     if target_model in models:
         return target_model
     else:
@@ -130,7 +135,7 @@ last_used_checkpoint = None
 
 def load_model(selected_model, selected_checkpoint, progress=None):
     global model, last_used_checkpoint
-    checkpoint_use = os.path.join(args.ckpt_dir, args.ckpt)
+    checkpoint_use = default_sdxl_model
     if selected_checkpoint:
         checkpoint_use = os.path.join(args.ckpt_dir, selected_checkpoint)
         if last_used_checkpoint is None:
@@ -482,7 +487,7 @@ def stage2_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], captions,
                    ckpt_select, num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
                    face_prompt,outputs_folder, make_comparison_video, video_duration, video_fps,
                     video_width, video_height, batch_process_folder,dont_update_progress=False, unload=True, progress=gr.Progress()):
-    global model, status_container, event_id
+    global model, status_container, event_id, last_used_checkpoint
     main_begin_time = time.time()
     load_model(model_select, ckpt_select, progress)
     to_gpu(model, SUPIR_device)
@@ -511,7 +516,7 @@ def stage2_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], captions,
                     img_prompt = cf.read()
 
         event_id = str(time.time_ns())
-        event_dict = {'event_id': event_id, 'localtime': time.ctime(), 'prompt': img_prompt, 'base_model': args.ckpt,
+        event_dict = {'event_id': event_id, 'localtime': time.ctime(), 'prompt': img_prompt, 'base_model': last_used_checkpoint,
                       'a_prompt': a_prompt,
                       'n_prompt': n_prompt, 'num_samples': num_samples, 'upscale': upscale, 'edm_steps': edm_steps,
                       's_stage1': s_stage1, 's_stage2': s_stage2, 's_cfg': s_cfg, 'seed': seed, 's_churn': s_churn,
