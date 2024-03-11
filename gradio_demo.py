@@ -92,6 +92,10 @@ def refresh_models_click():
     new_model_list = list_models()
     return gr.update(choices=new_model_list)
 
+def open_folder():
+    open_folder_path = os.path.abspath(args.outputs_folder)
+    os.startfile(open_folder_path)
+
 def list_models():
     model_dir = args.ckpt_dir
     output = []
@@ -183,8 +187,12 @@ def load_llava():
     global llava_agent
     if llava_agent is None and use_llava:
         llava_path = get_model('liuhaotian/llava-v1.5-7b')
-        llava_agent = LLavaAgent(llava_path, device='cuda', load_8bit=args.load_8bit_llava, load_4bit=args.load_4bit_llava)
+        llava_agent = LLavaAgent(llava_path, device=LLaVA_device, load_8bit=args.load_8bit_llava, load_4bit=args.load_4bit_llava)
 
+def clear_llava():
+    global llava_agent
+    llava_agent = None
+    torch.cuda.empty_cache()
 
 def all_to_cpu():
     global face_helper, model, llava_agent
@@ -286,20 +294,20 @@ def update_elements(status_label):
             result_gallery_el = gr.update(visible=False)
             slider_full_btn_el = gr.update(visible=True)
             result_slider_el = gr.update(visible=True, value=None)
-        elif "Stage 1" in status_label:
+        if "Stage 1" in status_label:
             print("Updating stage 1 output image")
-            # Get the first value from status_container.image_data dict
-            src_image_path = list(status_container.image_data.keys())[0]
-            with Image.open(src_image_path) as img:
-                src_image = np.array(img)
-            out_image = list(status_container.image_data.values())[0]
-            # Show slider for stage1
-            result_slider_el = gr.update(value=[src_image, out_image], visible=True)
+            result_slider_el = gr.update(value=status_container.result_gallery, visible=True)
             slider_full_btn_el = gr.update(visible=True)
             result_gallery_el = gr.update(visible=False)
         elif single_process:
             print("Updating Single Output Image")
             # Update the slider with the outputs, hide the gallery
+            try:
+                status_container.llava_caption = status_container.llava_captions[0]
+                if len (status_container.llava_caption ) > 2:
+                    prompt_el = gr.update(value=status_container.llava_caption)
+            except:
+                ""
             result_slider_el = gr.update(value=status_container.result_gallery, visible=True)
             slider_full_btn_el = gr.update(visible=True)
             result_gallery_el = gr.update(visible=False)
@@ -390,7 +398,7 @@ def stage1_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], gamma, mo
     output_data = {}
     total_steps = len(inputs.keys()) + (1 if unload else 0)
     step = 0
-
+    main_begin_time = time.time()
     load_model(model_select, ckpt_select, progress)
     model = to_gpu(model, SUPIR_device)
     all_results = []
@@ -420,9 +428,15 @@ def stage1_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], gamma, mo
         if progress is not None:
             progress(step / total_steps, desc="Unloading models...")
         all_to_cpu()
+    if len(inputs.keys()) == 1:
+            # Prepend the first input image to all_results for slider
+         all_results.insert(0, list(inputs.values())[0])  
     status_container.result_gallery = all_results
     status_container.image_data = output_data
-    return f"Stage 1 Processing Completed: processed {len(inputs)} images at {time.ctime()}"
+    main_end_time = time.time()
+    global unique_counter
+    unique_counter = unique_counter+1
+    return f"Stage 1 Processing Completed: processed {len(inputs)} images at in {main_end_time - main_begin_time:.2f} seconds #{unique_counter}"
 
 
 # input_image, prompt, a_prompt, n_prompt, num_samples, upscale,
@@ -440,7 +454,7 @@ def start_single_process(input_image, prompt, a_prompt, n_prompt, num_samples, u
                          gamma_correction, linear_CFG, linear_s_stage2, spt_linear_CFG, spt_linear_s_stage2,
                          model_select,
                          ckpt_select, num_images, random_seed, apply_stage_1, apply_stage_2, face_resolution, apply_bg,
-                         apply_face, face_prompt, apply_llava, temperature, top_p, qs, make_comparison_video,
+                         apply_face, face_prompt, apply_llava,auto_deload_llava, temperature, top_p, qs, make_comparison_video,
                          video_duration,
                          video_fps, video_width, video_height, progress=gr.Progress()):
     global status_container, batch_processing_val
@@ -471,7 +485,7 @@ def start_single_process(input_image, prompt, a_prompt, n_prompt, num_samples, u
                                   model_select, ckpt_select,
                                   num_images, random_seed, apply_stage_1, apply_stage_2, face_resolution, apply_bg,
                                   apply_face,
-                                  face_prompt, apply_llava, temperature, top_p, qs, make_comparison_video,
+                                  face_prompt, apply_llava,auto_deload_llava, temperature, top_p, qs, make_comparison_video,
                                   video_duration,
                                   video_fps, video_width, video_height,"", progress=progress)
     except Exception as e:
@@ -769,7 +783,7 @@ def start_batch_process(batch_process_folder, outputs_folder, main_prompt, a_pro
                         model_select, ckpt_select,
                         num_images, random_seed, apply_stage_1, apply_stage_2, face_resolution, apply_bg, apply_face,
                         face_prompt,
-                        batch_process_llava, temperature, top_p, qs, make_comparison_video, video_duration, video_fps,
+                        batch_process_llava,auto_deload_llava, temperature, top_p, qs, make_comparison_video, video_duration, video_fps,
                         video_width, video_height, progress=gr.Progress()):
     global status_container, batch_processing_val
     status_container = StatusContainer()
@@ -803,7 +817,7 @@ def start_batch_process(batch_process_folder, outputs_folder, main_prompt, a_pro
                                   model_select, ckpt_select,
                                   num_images, random_seed, apply_stage_1, apply_stage_2, face_resolution, apply_bg,
                                   apply_face,
-                                  face_prompt, batch_process_llava, temperature, top_p, qs, make_comparison_video,
+                                  face_prompt, batch_process_llava,auto_deload_llava, temperature, top_p, qs, make_comparison_video,
                                   video_duration,
                                   video_fps, video_width, video_height,batch_process_folder, progress=progress)
     except Exception as e:
@@ -818,7 +832,7 @@ def batch_process(img_data, outputs_folder, main_prompt, a_prompt, n_prompt, num
                   ckpt_select, num_images, random_seed, apply_stage_1, apply_stage_2, face_resolution, apply_bg,
                   apply_face,
                   face_prompt,
-                  batch_process_llava, temperature, top_p, qs, make_comparison_video, video_duration, video_fps,
+                  batch_process_llava,auto_deload_llava, temperature, top_p, qs, make_comparison_video, video_duration, video_fps,
                   video_width, video_height,batch_process_folder, progress=gr.Progress()):
     global batch_processing_val, llava_agent
     start_time = time.time()
@@ -829,10 +843,7 @@ def batch_process(img_data, outputs_folder, main_prompt, a_prompt, n_prompt, num
     batch_processing_val = True
     # Get the list of image files in the folder
     total_images = len(img_data.keys())
-    if apply_stage_1:
-        print("Processing images (Stage 1)")
-        last_result = stage1_process(img_data, gamma_correction, model_select, ckpt_select, unload=False, progress=progress)
-        img_data = status_container.image_data
+    org_img_data = copy.deepcopy(img_data)
 
     if not batch_processing_val:
         return f"Batch Processing Completed: Cancelled at {time.ctime()}.", last_result
@@ -840,14 +851,20 @@ def batch_process(img_data, outputs_folder, main_prompt, a_prompt, n_prompt, num
     # batch process llava = apply llava
     if batch_process_llava:
         print('Processing LLaVA')
+        if apply_stage_1:
+            print("Processing images (Stage 1)")
+            last_result = stage1_process(img_data, gamma_correction, model_select, ckpt_select, unload=False, progress=progress)
+            img_data = status_container.image_data
         last_result = llava_process(img_data, temperature, top_p, qs, unload=True, progress=progress)
         captions = status_container.llava_captions
+        if auto_deload_llava:
+            clear_llava()
     else:
         captions = [main_prompt] * total_images
 
     if not batch_processing_val:
         return f"Batch Processing Completed: Cancelled at {time.ctime()}.", last_result
-
+    img_data = copy.deepcopy(org_img_data)
     if apply_stage_2:
         print("Processing images (Stage 2)")
         last_result = stage2_process(img_data, captions, a_prompt, n_prompt, num_samples, upscale, edm_steps,
@@ -1006,6 +1023,8 @@ with block:
                         with gr.Column():
                             apply_llava_checkbox = gr.Checkbox(label="Apply LLaVa", value=False)
                         with gr.Column():
+                            auto_de_load_llava = gr.Checkbox(label="Auto Deload LLaVA - Free VRAM", value=False)
+                        with gr.Column():
                             apply_stage_2_checkbox = gr.Checkbox(label="Apply Stage 2", value=True)
                     show_select = args.ckpt_browser
                     with gr.Row():
@@ -1066,6 +1085,8 @@ with block:
 
             with gr.Column():
                 target_res_textbox = gr.Textbox(label="Input / Output Resolution", value="", interactive=False)
+                btn_open_outputs = gr.Button("Open Outputs Folder")
+                btn_open_outputs.click(fn=open_folder)
                 with gr.Accordion("Batch options", open=True):
                     with gr.Row():
                         with gr.Column():
@@ -1135,7 +1156,7 @@ with block:
     with gr.Tab("Restored Faces"):
         with gr.Row():
             face_gallery = gr.Gallery(label='Faces', show_label=False, elem_id="gallery2")
-    with gr.Tab("About_V36"):
+    with gr.Tab("About_V38"):
         gr.Markdown(title_md)
         with gr.Row():
             gr.Markdown(claim_md)
@@ -1157,7 +1178,7 @@ with block:
         ckpt_select_dropdown, num_images_slider, random_seed_checkbox,
         apply_stage_1_ckeckbox, apply_stage_2_checkbox, face_resolution_slider,
         apply_bg_checkbox, apply_face_checkbox, face_prompt_textbox,
-        apply_llava_checkbox, temperature_slider, top_p_slider, qs_slider,
+        apply_llava_checkbox,auto_de_load_llava, temperature_slider, top_p_slider, qs_slider,
         make_comparison_video_checkbox, video_duration_textbox, video_fps_textbox,
         video_width_textbox, video_height_textbox
     ]
@@ -1172,7 +1193,7 @@ with block:
         spt_linear_s_stage2_checkbox, model_select_radio, ckpt_select_dropdown,
         num_images_slider, random_seed_checkbox, apply_stage_1_ckeckbox,
         apply_stage_2_checkbox, face_resolution_slider, apply_bg_checkbox,
-        apply_face_checkbox, face_prompt_textbox, apply_llava_checkbox,
+        apply_face_checkbox, face_prompt_textbox, apply_llava_checkbox,auto_de_load_llava,
         temperature_slider, top_p_slider, qs_slider, make_comparison_video_checkbox,
         video_duration_textbox, video_fps_textbox, video_width_textbox,
         video_height_textbox
