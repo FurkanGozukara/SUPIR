@@ -40,17 +40,16 @@ def download_file(url, folder_path, file_name=None):
 
 
 # Define the folders and their corresponding file URLs with optional file names
-folders_and_files = {
-    os.path.join('models'): [
-        ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0F.ckpt', 'v0F.ckpt'),
-        ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0Q.ckpt', 'v0Q.ckpt'),
-        ('https://huggingface.co/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/resolve/main/open_clip_pytorch_model.bin', None)
+checkpoint_files = {
+    os.path.join('models', 'checkpoints'): [
+        ('https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors', 'Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors'),
+        ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0F.ckpt', 'SUPIR-v0F.ckpt'),
+        ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0Q.ckpt', 'SUPIR-v0Q.ckpt')        
     ]
 }
 
-
 if __name__ == '__main__':
-    for folder, files in folders_and_files.items():
+    for folder, files in checkpoint_files.items():
         create_directory(folder)
         for file_url, file_name in files:
             download_file(file_url, folder, file_name)
@@ -58,15 +57,33 @@ if __name__ == '__main__':
     llava_model = os.getenv('LLAVA_MODEL', 'liuhaotian/llava-v1.5-7b')
     llava_clip_model = 'openai/clip-vit-large-patch14-336'
     sdxl_clip_model = 'openai/clip-vit-large-patch14'
+    sdxl_clip2_model ='laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/open_clip_pytorch_model.bin' 
 
     print(f'Downloading LLaVA model: {llava_model}')
-    model_folder = llava_model.split('/')[1]
-    snapshot_download(llava_model, local_dir=os.path.join("models", model_folder), local_dir_use_symlinks=False)
+    model_folder = fr"models/{llava_model}"
+    if not os.path.exists(model_folder):
+        snapshot_download(llava_model, local_dir=model_folder, local_dir_use_symlinks=False)
+    else:        
+        print(f'Model already exists: {llava_model}')
 
     print(f'Downloading LLaVA CLIP model: {llava_clip_model}')
-    model_folder = llava_clip_model.split('/')[1]
-    snapshot_download(llava_clip_model, local_dir=os.path.join("models", model_folder), local_dir_use_symlinks=False)
+    model_folder = fr"models/{llava_clip_model}"
+    if not os.path.exists(model_folder):
+        snapshot_download(llava_clip_model, local_dir=model_folder, local_dir_use_symlinks=False)
+    else:
+        print(f'Model already exists: {llava_clip_model}')
 
     print(f'Downloading SDXL CLIP model: {sdxl_clip_model}')
-    model_folder = sdxl_clip_model.split('/')[1]
-    snapshot_download(sdxl_clip_model, local_dir=os.path.join("models", model_folder), local_dir_use_symlinks=False)
+    model_folder = fr"models/{sdxl_clip_model}"
+    if not os.path.exists(model_folder):
+        snapshot_download(sdxl_clip_model, local_dir=model_folder, local_dir_use_symlinks=False)
+    else:
+        print(f'Model already exists: {sdxl_clip_model}')
+
+    print(f'Downloading SDXL CLIP 2 model: {sdxl_clip2_model}')    
+    model_id = fr"{sdxl_clip2_model.split('/')[-3]}/{sdxl_clip2_model.split('/')[-2]}"
+    model_folder = fr"models/{model_id}"
+    if not os.path.exists(fr"models/{sdxl_clip2_model}"):
+        snapshot_download(model_id, allow_patterns=sdxl_clip2_model.split('/')[-1], local_dir=model_folder, local_dir_use_symlinks=False)
+    else:
+        print(f'Model already exists: {sdxl_clip2_model}')

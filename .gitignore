@@ -1,4 +1,5 @@
 .vs/
+.vscode/
 SUPIR/__pycache__/
 SUPIR/models/__pycache__/
 SUPIR/modules/__pycache__/

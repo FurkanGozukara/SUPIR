@@ -42,7 +42,7 @@ parser.add_argument("--decoder_tile_size", type=int, default=64)
 parser.add_argument("--load_8bit_llava", action='store_true', default=False)
 parser.add_argument("--load_4bit_llava", action='store_true', default=True)
 #parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
-parser.add_argument("--ckpt_browser", action='store_true', default=True)
+#parser.add_argument("--ckpt_browser", action='store_true', default=True)
 parser.add_argument("--ckpt_dir", type=str, default='models')
 parser.add_argument("--ckpt_dir2", type=str, default=None)
 parser.add_argument("--theme", type=str, default='default')
@@ -102,7 +102,7 @@ def list_models():
     output.append(CKPT_PTH.DEFAULT_SDXL_PATH.split('/')[-1])
 
     if os.path.exists(model_dir):
-        output = [f for f in os.listdir(model_dir) if f.endswith('.safetensors') or f.endswith('.ckpt')]
+        output = [f for f in os.listdir(model_dir) if ((f.endswith('.safetensors') or f.endswith('.ckpt')) and 'SUPIR-v0F.ckpt' not in f and 'SUPIR-v0Q.ckpt' not in f)]
     else:
         local_model_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
         if os.path.exists(local_model_dir):
@@ -186,7 +186,7 @@ def load_model(selected_model, selected_checkpoint, progress=None):
 def load_llava():
     global llava_agent
     if llava_agent is None and use_llava:
-        llava_path = get_model('liuhaotian/llava-v1.5-7b')
+        llava_path = get_model(CKPT_PTH.LLAVA_MODEL_PATH)
         llava_agent = LLavaAgent(llava_path, device=LLaVA_device, load_8bit=args.load_8bit_llava, load_4bit=args.load_4bit_llava)
 
 def clear_llava():
@@ -530,7 +530,7 @@ def stage2_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], captions,
                     img_prompt = cf.read()
 
         event_id = str(time.time_ns())
-        event_dict = {'event_id': event_id, 'localtime': time.ctime(), 'prompt': img_prompt, 'base_model': last_used_checkpoint,
+        event_dict = {'event_id': event_id, 'localtime': time.ctime(), 'prompt': img_prompt, 'base_model': last_used_checkpoint.split('/')[-1],
                       'a_prompt': a_prompt,
                       'n_prompt': n_prompt, 'num_samples': num_samples, 'upscale': upscale, 'edm_steps': edm_steps,
                       's_stage1': s_stage1, 's_stage2': s_stage2, 's_cfg': s_cfg, 'seed': seed, 's_churn': s_churn,
@@ -1026,7 +1026,7 @@ with block:
                             auto_de_load_llava = gr.Checkbox(label="Auto Deload LLaVA - Free VRAM", value=False)
                         with gr.Column():
                             apply_stage_2_checkbox = gr.Checkbox(label="Apply Stage 2", value=True)
-                    show_select = args.ckpt_browser
+                    
                     with gr.Row():
                         with gr.Column(scale=2):
                             ckpt_select_dropdown = gr.Dropdown(label="Model", choices=list_models(), value=selected_model(),
