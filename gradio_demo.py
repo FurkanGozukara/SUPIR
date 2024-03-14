@@ -20,7 +20,7 @@ from omegaconf import OmegaConf
 
 from SUPIR.models.SUPIR_model import SUPIRModel
 from SUPIR.util import HWC3, upscale_image, fix_resize, convert_dtype
-from SUPIR.util import create_SUPIR_model
+from SUPIR.util import create_model, load_model_weights
 from SUPIR.utils.compare import create_comparison_video
 from SUPIR.utils.face_restoration_helper import FaceRestoreHelper
 from SUPIR.utils.model_fetch import get_model
@@ -41,8 +41,6 @@ parser.add_argument("--encoder_tile_size", type=int, default=512)
 parser.add_argument("--decoder_tile_size", type=int, default=64)
 parser.add_argument("--load_8bit_llava", action='store_true', default=False)
 parser.add_argument("--load_4bit_llava", action='store_true', default=True)
-#parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
-#parser.add_argument("--ckpt_browser", action='store_true', default=True)
 parser.add_argument("--ckpt_dir", type=str, default='models')
 parser.add_argument("--ckpt_dir2", type=str, default=None)
 parser.add_argument("--theme", type=str, default='default')
@@ -150,38 +148,25 @@ def load_model(selected_model, selected_checkpoint, progress=None):
         torch.cuda.empty_cache()
         last_used_checkpoint = checkpoint_use
     
-    if model is None:
+    reload_supir = (selected_model != model.current_model) if not model is None else False
+    if model is None or reload_supir:
         if progress is not None:
             progress(1 / 2, desc="Loading SUPIR...")
-        model = create_SUPIR_model('options/SUPIR_v0.yaml', supir_sign='Q', device='cpu',
+        
+        if reload_supir == False:
+            model = create_model('options/SUPIR_v0.yaml')        
+        
+        model = load_model_weights(model, supir_sign=selected_model[-1], reload_supir=reload_supir,
                                    ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use)
         if args.loading_half_params:
             model = model.half()
         if args.use_tile_vae:
             model.init_tile_vae(encoder_tile_size=512, decoder_tile_size=64)
         model.first_stage_model.denoise_encoder_s1 = copy.deepcopy(model.first_stage_model.denoise_encoder)
-        model.current_model = 'v0-Q'
-
-    if selected_model != model.current_model:
-        config = OmegaConf.load('options/SUPIR_v0_tiled.yaml')
-        device = 'cpu'
-        if selected_model == 'v0-Q':
-            print('load v0-Q')
-            if progress is not None:
-                progress(1 / 2, desc="Updating SUPIR checkpoint...")
-            ckpt_q = torch.load(config.SUPIR_CKPT_Q, map_location=device)
-            model.load_state_dict(ckpt_q, strict=False)
-            model.current_model = 'v0-Q'
-        elif selected_model == 'v0-F':
-            print('load v0-F')
-            if progress is not None:
-                progress(1 / 2, desc="Updating SUPIR checkpoint...")
-            ckpt_f = torch.load(config.SUPIR_CKPT_F, map_location=device)
-            model.load_state_dict(ckpt_f, strict=False)
-            model.current_model = 'v0-F'
+        model.current_model = selected_model
+   
     if progress is not None:
         progress(2 / 2, desc="SUPIR loaded.")
-
 
 def load_llava():
     global llava_agent

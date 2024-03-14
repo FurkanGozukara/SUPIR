@@ -6,7 +6,7 @@ import argparse
 from SUPIR.util import HWC3, upscale_image, fix_resize, convert_dtype
 import numpy as np
 import torch
-from SUPIR.util import create_SUPIR_model, load_QF_ckpt
+from SUPIR.util import load_model_weights, load_QF_ckpt
 from PIL import Image
 from llava.llava_agent import LLavaAgent
 from CKPT_PTH import LLAVA_MODEL_PATH
@@ -43,7 +43,7 @@ else:
 # load SUPIR
 config_path = 'options/SUPIR_v0.yaml'
 config = OmegaConf.load(config_path)
-model = create_SUPIR_model(config_path, supir_sign='Q')
+model = load_model_weights(config_path, supir_sign='Q')
 if args.loading_half_params:
     model = model.half()
 if args.use_tile_vae:

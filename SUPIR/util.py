@@ -8,6 +8,9 @@ from omegaconf import OmegaConf
 from sgm.util import instantiate_from_config
 from SUPIR.utils.model_fetch import get_model
 import CKPT_PTH 
+
+config = None
+
 def get_state_dict(d):
     return d.get('state_dict', d)
 
@@ -24,27 +27,26 @@ def load_state_dict(ckpt_path, location='cpu'):
     return state_dict
 
 
-def create_model(config_path):
+def create_model(config_path, device='cpu'):
+    global config
     config = OmegaConf.load(config_path)
-    model = instantiate_from_config(config.model).cpu()
-    print(f'Loaded model config from [{config_path}]')
+    model = instantiate_from_config(config.model)
+    model = model.to(device)
+    print(f'Loaded model config from [{config_path}] and moved to {device}')
     return model
 
 
-def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt_dir=None, ckpt=None):
-    config = OmegaConf.load(config_path)
-    if ckpt:
-        config.SDXL_CKPT = ckpt
-    model = instantiate_from_config(config.model)
-    # Move model to the specified device
-    model = model.to(device)
-    print(f'Loaded model config from [{config_path}] and moved to {device}')
-
-    if config.SDXL_CKPT is not None:        
-        model.load_state_dict(load_state_dict(config.SDXL_CKPT), strict=False)
-    if config.SUPIR_CKPT is not None:
-        model_file = get_model(os.path.join(ckpt_dir, config.SUPIR_CKPT))
-        model.load_state_dict(load_state_dict(model_file), strict=False)
+def load_model_weights(model, supir_sign=None, reload_supir=False, ckpt_dir=None, ckpt=None):
+    global config
+    if reload_supir == False:      
+        if ckpt:
+           config.SDXL_CKPT = ckpt       
+        if config.SDXL_CKPT is not None:        
+            model.load_state_dict(load_state_dict(config.SDXL_CKPT), strict=False)
+        if config.SUPIR_CKPT is not None:
+            model_file = get_model(os.path.join(ckpt_dir, config.SUPIR_CKPT))
+            model.load_state_dict(load_state_dict(model_file), strict=False)
+    
     if supir_sign is not None:
         assert supir_sign in ['F', 'Q']
         if supir_sign == 'F':            
@@ -53,6 +55,7 @@ def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt_dir=None
         elif supir_sign == 'Q':
             model_file = get_model(CKPT_PTH.SUPIR_CKPT_Q_PTH)            
             model.load_state_dict(load_state_dict(model_file), strict=False)
+    
     return model
 
 
