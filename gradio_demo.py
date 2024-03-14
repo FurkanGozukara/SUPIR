@@ -25,6 +25,7 @@ from SUPIR.utils.compare import create_comparison_video
 from SUPIR.utils.face_restoration_helper import FaceRestoreHelper
 from SUPIR.utils.model_fetch import get_model
 from SUPIR.utils.status_container import StatusContainer
+from SUPIR.utils import shared
 from llava.llava_agent import LLavaAgent
 import CKPT_PTH
 
@@ -43,6 +44,7 @@ parser.add_argument("--load_8bit_llava", action='store_true', default=False)
 parser.add_argument("--load_4bit_llava", action='store_true', default=True)
 #parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
 #parser.add_argument("--ckpt_browser", action='store_true', default=True)
+parser.add_argument("--fp8", action='store_true', default=False)
 parser.add_argument("--ckpt_dir", type=str, default='models')
 parser.add_argument("--ckpt_dir2", type=str, default=None)
 parser.add_argument("--theme", type=str, default='default')
@@ -51,6 +53,8 @@ parser.add_argument("--outputs_folder", type=str, default='outputs')
 parser.add_argument("--debug", action='store_true', default=False)
 args = parser.parse_args()
 
+shared.opts.fp8_storage = args.fp8
+shared.opts.half_mode = args.loading_half_params
 server_ip = args.ip
 use_llava = not args.no_llava
 model_path = None
@@ -154,11 +158,11 @@ def load_model(selected_model, selected_checkpoint, progress=None):
         if progress is not None:
             progress(1 / 2, desc="Loading SUPIR...")
         model = create_SUPIR_model('options/SUPIR_v0.yaml', supir_sign='Q', device='cpu',
-                                   ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use)
-        if args.loading_half_params:
-            model = model.half()
+                                   ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use,)
+        # if args.loading_half_params:
+        #     model = model.half()
         if args.use_tile_vae:
-            model.init_tile_vae(encoder_tile_size=512, decoder_tile_size=64)
+           model.init_tile_vae(encoder_tile_size=512, decoder_tile_size=64)
         model.first_stage_model.denoise_encoder_s1 = copy.deepcopy(model.first_stage_model.denoise_encoder)
         model.current_model = 'v0-Q'
 
@@ -505,8 +509,8 @@ def stage2_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], captions,
     main_begin_time = time.time()
     load_model(model_select, ckpt_select, progress)
     to_gpu(model, SUPIR_device)
-    model.ae_dtype = convert_dtype(ae_dtype)
-    model.model.dtype = convert_dtype(diff_dtype)
+    model.ae_dtype = convert_dtype('fp16')
+    model.model.dtype = convert_dtype('fp16')
 
     idx = 0
 
