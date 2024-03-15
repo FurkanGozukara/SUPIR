@@ -9,7 +9,7 @@ tokenizers # Leave this to be set by the installed transformers version
 uvicorn==0.28.0
 wandb==0.16.4
 httpx
-transformers==4.38.2
+transformers==4.38.1
 accelerate==0.27.2
 scikit-learn==1.4.1.post1
 sentencepiece
@@ -24,7 +24,7 @@ ninja==1.11.1.1
 omegaconf==2.3.0
 open-clip-torch==2.24.0
 opencv-python==4.9.0.80
-pandas==1.5.3
+pandas==2.1.4
 Pillow==10.2.0
 pytorch-lightning # Leave this to be set by the installed torch version
 PyYAML==6.0.1
