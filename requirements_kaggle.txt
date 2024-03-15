@@ -2,15 +2,14 @@ gradio==4.21.0
 gradio_imageslider
 gradio_client
 Markdown==3.5.2
-requests==2.31.0
 sentencepiece==0.2.0
 tokenizers # Leave this to be set by the installed transformers version
-uvicorn==0.28.0
-wandb==0.16.4
+uvicorn
+wandb
 httpx
 transformers==4.38.1
 accelerate==0.27.2
-scikit-learn==1.4.1.post1
+scikit-learn
 sentencepiece
 einops==0.7.0
 einops-exts==0.0.4
@@ -18,32 +17,18 @@ timm==0.9.16
 openai-clip==1.0.1
 fsspec
 kornia==0.7.1
-matplotlib==3.8.3
+matplotlib==3.7.5
 ninja==1.11.1.1
 omegaconf==2.3.0
 open-clip-torch==2.24.0
 opencv-python==4.9.0.80
 pandas==2.1.4
-Pillow==10.2.0
 pytorch-lightning # Leave this to be set by the installed torch version
-PyYAML==6.0.1
-tqdm==4.66.2
+PyYAML
+tqdm
 webdataset==0.2.86
 fastapi
 diffusers
 facexlib==0.3.0
-torch==2.2.0+cu121
-torchvision==0.17.0+cu121
-torchaudio==2.2.0+cu121
-xformers==0.0.24
-jupyterlab-lsp==4.3.0
-jupyterlab==3.6.0
-numpy==1.25.2
-shapely==2.0.1
-keras==2.15.0
-keras-core
-# Only for windows
-https://huggingface.co/MonsterMMORPG/SECourses/resolve/main/triton-2.1.0-cp310-cp310-win_amd64.whl ; platform_system == "Windows"
---extra-index-url https://download.pytorch.org/whl/cu121
 
 
