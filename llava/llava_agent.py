@@ -16,7 +16,7 @@ import glob as gb
 
 
 class LLavaAgent:
-    def __init__(self, model_path, device='cuda', conv_mode='vicuna_v1', load_8bit=False, load_4bit=False):
+    def __init__(self, model_path, device='cuda:0', conv_mode='vicuna_v1', load_8bit=False, load_4bit=False):
         self.device = device
         if torch.device(self.device).index is not None:
             device_map = {'model': torch.device(self.device).index, 'lm_head': torch.device(self.device).index}

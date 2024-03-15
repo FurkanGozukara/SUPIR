@@ -20,12 +20,12 @@ from omegaconf import OmegaConf
 
 from SUPIR.models.SUPIR_model import SUPIRModel
 from SUPIR.util import HWC3, upscale_image, fix_resize, convert_dtype
-from SUPIR.util import create_SUPIR_model
+from SUPIR.util import create_model, load_supir_weights
 from SUPIR.utils.compare import create_comparison_video
 from SUPIR.utils.face_restoration_helper import FaceRestoreHelper
 from SUPIR.utils.model_fetch import get_model
 from SUPIR.utils.status_container import StatusContainer
-from SUPIR.utils import shared
+from SUPIR.utils import shared, devices
 from llava.llava_agent import LLavaAgent
 import CKPT_PTH
 
@@ -36,15 +36,14 @@ parser.add_argument("--port", type=int)
 parser.add_argument("--no_llava", action='store_true', default=False)
 parser.add_argument("--use_image_slider", action='store_true', default=False)
 parser.add_argument("--log_history", action='store_true', default=False)
-parser.add_argument("--loading_half_params", action='store_true', default=False)
+parser.add_argument("--lowvram", action='store_true', default=False)
+parser.add_argument("--lowvram_fp8", action='store_true', default=False)
+parser.add_argument("--force_vae_upcasting", action='store_true', default=False)
 parser.add_argument("--use_tile_vae", action='store_true', default=False)
 parser.add_argument("--encoder_tile_size", type=int, default=512)
 parser.add_argument("--decoder_tile_size", type=int, default=64)
 parser.add_argument("--load_8bit_llava", action='store_true', default=False)
 parser.add_argument("--load_4bit_llava", action='store_true', default=True)
-#parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors')
-#parser.add_argument("--ckpt_browser", action='store_true', default=True)
-parser.add_argument("--fp8", action='store_true', default=False)
 parser.add_argument("--ckpt_dir", type=str, default='models')
 parser.add_argument("--ckpt_dir2", type=str, default=None)
 parser.add_argument("--theme", type=str, default='default')
@@ -53,8 +52,12 @@ parser.add_argument("--outputs_folder", type=str, default='outputs')
 parser.add_argument("--debug", action='store_true', default=False)
 args = parser.parse_args()
 
-shared.opts.fp8_storage = args.fp8
-shared.opts.half_mode = args.loading_half_params
+shared.opts.half_mode = args.lowvram
+
+if args.lowvram_fp8:
+    shared.opts.half_mode = args.lowvram_fp8
+    shared.opts.fp8_storage = args.lowvram_fp8
+
 server_ip = args.ip
 use_llava = not args.no_llava
 model_path = None
@@ -74,7 +77,6 @@ CKPT_PTH.setModelsPath(model_path, model_path2)
 
 #get default from repo if not exists yet
 default_sdxl_model = get_model(CKPT_PTH.DEFAULT_SDXL_PATH)
-
 
 if torch.cuda.device_count() >= 2:
     SUPIR_device = 'cuda:0'
@@ -151,41 +153,28 @@ def load_model(selected_model, selected_checkpoint, progress=None):
 
     if last_used_checkpoint != checkpoint_use:
         model = None
-        torch.cuda.empty_cache()
+        devices.torch_gc()
         last_used_checkpoint = checkpoint_use
     
-    if model is None:
+    reload_supir = (selected_model != model.current_model) if hasattr(model, 'current_model') and not model is None else False
+    if model is None or reload_supir:
         if progress is not None:
             progress(1 / 2, desc="Loading SUPIR...")
-        model = create_SUPIR_model('options/SUPIR_v0.yaml', supir_sign='Q', device='cpu',
-                                   ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use,)
-        # if args.loading_half_params:
-        #     model = model.half()
+        
+        if reload_supir == False:
+            model = create_model(f"options/{'SUPIR_v0_tiled.yaml' if args.use_tile_vae else 'SUPIR_v0.yaml'}")        
+        
+        model = load_supir_weights(model, supir_sign=selected_model[-1], reload_supir=reload_supir,
+                                   ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use, vae_file=None)
+       
         if args.use_tile_vae:
            model.init_tile_vae(encoder_tile_size=512, decoder_tile_size=64)
-        model.first_stage_model.denoise_encoder_s1 = copy.deepcopy(model.first_stage_model.denoise_encoder)
-        model.current_model = 'v0-Q'
 
-    if selected_model != model.current_model:
-        config = OmegaConf.load('options/SUPIR_v0_tiled.yaml')
-        device = 'cpu'
-        if selected_model == 'v0-Q':
-            print('load v0-Q')
-            if progress is not None:
-                progress(1 / 2, desc="Updating SUPIR checkpoint...")
-            ckpt_q = torch.load(config.SUPIR_CKPT_Q, map_location=device)
-            model.load_state_dict(ckpt_q, strict=False)
-            model.current_model = 'v0-Q'
-        elif selected_model == 'v0-F':
-            print('load v0-F')
-            if progress is not None:
-                progress(1 / 2, desc="Updating SUPIR checkpoint...")
-            ckpt_f = torch.load(config.SUPIR_CKPT_F, map_location=device)
-            model.load_state_dict(ckpt_f, strict=False)
-            model.current_model = 'v0-F'
+        model.first_stage_model.denoise_encoder_s1 = copy.deepcopy(model.first_stage_model.denoise_encoder)
+        model.current_model = selected_model
+   
     if progress is not None:
         progress(2 / 2, desc="SUPIR loaded.")
-
 
 def load_llava():
     global llava_agent
@@ -196,7 +185,7 @@ def load_llava():
 def clear_llava():
     global llava_agent
     llava_agent = None
-    torch.cuda.empty_cache()
+    devices.torch_gc()
 
 def all_to_cpu():
     global face_helper, model, llava_agent
@@ -369,8 +358,8 @@ def llava_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], temp, p, q
             progress(step / total_steps, desc="Loading LLaVA...")
         load_llava()
         print("LLaVA loaded.")
-        llava_agent = to_gpu(llava_agent, LLaVA_device)
-        print("LLaVA moved to GPU.")
+        #llava_agent = to_gpu(llava_agent, LLaVA_device)
+        #print("LLaVA moved to GPU.")
         if progress is not None:
             progress(step / total_steps, desc="LLaVA loaded, captioning images...")
         for img_path, img in inputs.items():
@@ -404,8 +393,9 @@ def stage1_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], gamma, mo
     step = 0
     main_begin_time = time.time()
     load_model(model_select, ckpt_select, progress)
-    model = to_gpu(model, SUPIR_device)
+    to_gpu(model, SUPIR_device)
     all_results = []
+   
     for image_path, img in inputs.items():
         step += 1
         if progress is not None:
@@ -509,8 +499,8 @@ def stage2_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], captions,
     main_begin_time = time.time()
     load_model(model_select, ckpt_select, progress)
     to_gpu(model, SUPIR_device)
-    model.ae_dtype = convert_dtype('fp16')
-    model.model.dtype = convert_dtype('fp16')
+    model.ae_dtype = convert_dtype('fp32' if args.force_vae_upcasting else ae_dtype)
+    model.model.dtype = convert_dtype(diff_dtype)
 
     idx = 0
 
@@ -857,7 +847,7 @@ def batch_process(img_data, outputs_folder, main_prompt, a_prompt, n_prompt, num
         print('Processing LLaVA')
         if apply_stage_1:
             print("Processing images (Stage 1)")
-            last_result = stage1_process(img_data, gamma_correction, model_select, ckpt_select, unload=False, progress=progress)
+            last_result = stage1_process(img_data, gamma_correction, model_select, ckpt_select, unload=True, progress=progress)
             img_data = status_container.image_data
         last_result = llava_process(img_data, temperature, top_p, qs, unload=True, progress=progress)
         captions = status_container.llava_captions
@@ -1244,6 +1234,8 @@ with block:
                              show_progress=False, queue=True)
 
 if args.port is not None:  # Check if the --port argument is provided
-    block.launch(server_name=server_ip, server_port=args.port, share=args.share, inbrowser=args.open_browser)
+    block.launch(server_name=server_ip, server_port=args.port, share=args.share, inbrowser=args.open_browser)    
 else:
     block.launch(server_name=server_ip, share=args.share, inbrowser=args.open_browser)
+
+   

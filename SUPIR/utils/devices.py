@@ -1,7 +1,7 @@
 import sys
 import contextlib
 from functools import lru_cache
-
+import gc
 import torch
 #from modules import errors
 
@@ -47,7 +47,7 @@ def torch_gc():
 
     if has_mps():
         mac_specific.torch_mps_gc()
-
+    gc.collect()
 
 def enable_tf32():
     if torch.cuda.is_available():

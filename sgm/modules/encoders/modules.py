@@ -16,6 +16,7 @@ from transformers import (
     CLIPTokenizer,
     T5EncoderModel,
     T5Tokenizer,
+    BitsAndBytesConfig
 )
 
 from SUPIR.utils.model_fetch import get_model
@@ -444,6 +445,8 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
 
     LAYERS = ["last", "pooled", "hidden"]
 
+  
+    
     def __init__(
         self,
         version="openai/clip-vit-large-patch14",
@@ -455,6 +458,8 @@ class FrozenCLIPEmbedder(AbstractEmbModel):
         always_return_pooled=False,
     ):  # clip-vit-base-patch32
         super().__init__()
+       
+
         assert layer in self.LAYERS
         model_file = get_model(CKPT_PTH.SDXL_CLIP1_PATH)
         self.tokenizer = CLIPTokenizer.from_pretrained(model_file)
@@ -525,11 +530,12 @@ class FrozenOpenCLIPEmbedder2(AbstractEmbModel):
     ):
         super().__init__()
         assert layer in self.LAYERS
+
         model_path = get_model(CKPT_PTH.SDXL_CLIP2_CKPT_PTH)
         model, _, _ = open_clip.create_model_and_transforms(
             arch,
             device=torch.device("cpu"),
-            pretrained=model_path,
+            pretrained=model_path                        
         )
         del model.visual
         self.model = model

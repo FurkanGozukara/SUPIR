@@ -1,6 +1,6 @@
 import torch.cuda
 import argparse
-from SUPIR.util import create_SUPIR_model, PIL2Tensor, Tensor2PIL, convert_dtype
+from SUPIR.util import load_model_weights, PIL2Tensor, Tensor2PIL, convert_dtype
 from PIL import Image
 from llava.llava_agent import LLavaAgent
 from CKPT_PTH import LLAVA_MODEL_PATH
@@ -52,7 +52,7 @@ print(args)
 use_llava = not args.no_llava
 
 # load SUPIR
-model = create_SUPIR_model('options/SUPIR_v0.yaml', supir_sign=args.SUPIR_sign).to(SUPIR_device)
+model = load_model_weights('options/SUPIR_v0.yaml', supir_sign=args.SUPIR_sign).to(SUPIR_device)
 model.ae_dtype_radio = convert_dtype(args.ae_dtype)
 model.model.dtype = convert_dtype(args.diff_dtype)
 # load LLaVA
