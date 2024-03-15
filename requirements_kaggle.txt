@@ -35,7 +35,9 @@ facexlib==0.3.0
 torch==2.2.0+cu121
 torchvision==0.17.0+cu121
 torchaudio==2.2.0+cu121
-xformers
+xformers==0.0.24
+jupyterlab-lsp==4.3.0
+jupyterlab==3.6.0
 # Only for windows
 https://huggingface.co/MonsterMMORPG/SECourses/resolve/main/triton-2.1.0-cp310-cp310-win_amd64.whl ; platform_system == "Windows"
 --extra-index-url https://download.pytorch.org/whl/cu121
