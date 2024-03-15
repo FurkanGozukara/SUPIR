@@ -1,8 +1,16 @@
+import sys
 import os
 import requests
 from tqdm import tqdm
 from huggingface_hub import snapshot_download
+from pathlib import PureWindowsPath
 
+MODEL_HOME = os.environ.get('MODEL_HOME', 'models')
+CHECKPOINT_DIR= os.path.join(MODEL_HOME, 'checkpoints')
+
+if sys.platform == 'win32':
+    MODEL_HOME = '/'.join(PureWindowsPath(MODEL_HOME).parts)
+    CHECKPOINT_DIR= '/'.join(PureWindowsPath(CHECKPOINT_DIR).parts)
 
 def create_directory(path):
     """Create directory if it does not exist."""
@@ -41,7 +49,7 @@ def download_file(url, folder_path, file_name=None):
 
 # Define the folders and their corresponding file URLs with optional file names
 checkpoint_files = {
-    os.path.join('models', 'checkpoints'): [
+    CHECKPOINT_DIR: [
         ('https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors', 'Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors'),
         ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0F.ckpt', 'SUPIR-v0F.ckpt'),
         ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0Q.ckpt', 'SUPIR-v0Q.ckpt')        
@@ -60,21 +68,21 @@ if __name__ == '__main__':
     sdxl_clip2_model ='laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/open_clip_pytorch_model.bin' 
 
     print(f'Downloading LLaVA model: {llava_model}')
-    model_folder = fr"models/{llava_model}"
+    model_folder = fr"{MODEL_HOME}/{llava_model}"
     if not os.path.exists(model_folder):
         snapshot_download(llava_model, local_dir=model_folder, local_dir_use_symlinks=False)
     else:        
         print(f'Model already exists: {llava_model}')
 
     print(f'Downloading LLaVA CLIP model: {llava_clip_model}')
-    model_folder = fr"models/{llava_clip_model}"
+    model_folder = fr"{MODEL_HOME}/{llava_clip_model}"
     if not os.path.exists(model_folder):
         snapshot_download(llava_clip_model, local_dir=model_folder, local_dir_use_symlinks=False)
     else:
         print(f'Model already exists: {llava_clip_model}')
 
     print(f'Downloading SDXL CLIP model: {sdxl_clip_model}')
-    model_folder = fr"models/{sdxl_clip_model}"
+    model_folder = fr"{MODEL_HOME}/{sdxl_clip_model}"
     if not os.path.exists(model_folder):
         snapshot_download(sdxl_clip_model, local_dir=model_folder, local_dir_use_symlinks=False)
     else:
@@ -82,8 +90,8 @@ if __name__ == '__main__':
 
     print(f'Downloading SDXL CLIP 2 model: {sdxl_clip2_model}')    
     model_id = fr"{sdxl_clip2_model.split('/')[-3]}/{sdxl_clip2_model.split('/')[-2]}"
-    model_folder = fr"models/{model_id}"
-    if not os.path.exists(fr"models/{sdxl_clip2_model}"):
+    model_folder = fr"{MODEL_HOME}/{model_id}"
+    if not os.path.exists(fr"{MODEL_HOME}/{sdxl_clip2_model}"):
         snapshot_download(model_id, allow_patterns=sdxl_clip2_model.split('/')[-1], local_dir=model_folder, local_dir_use_symlinks=False)
     else:
         print(f'Model already exists: {sdxl_clip2_model}')
