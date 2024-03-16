@@ -385,7 +385,7 @@ def llava_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], temp, p, q
         return f"LLaVA is not available at {time.ctime()}."
 
 
-def stage1_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], gamma, model_select, ckpt_select, unload=True, progress=None) -> str:
+def stage1_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], gamma, model_select, ckpt_select, unload=True, diff_dtype='fp16', ae_dtype='fp16', progress=None) -> str:
     global model
     global status_container
     output_data = {}
@@ -394,6 +394,8 @@ def stage1_process(inputs: Dict[str, List[np.ndarray[Any, np.dtype]]], gamma, mo
     main_begin_time = time.time()
     load_model(model_select, ckpt_select, progress)
     to_gpu(model, SUPIR_device)
+    model.ae_dtype = convert_dtype('fp32' if args.force_vae_upcasting else ae_dtype)
+    model.model.dtype = convert_dtype(diff_dtype)
     all_results = []
    
     for image_path, img in inputs.items():
@@ -847,7 +849,7 @@ def batch_process(img_data, outputs_folder, main_prompt, a_prompt, n_prompt, num
         print('Processing LLaVA')
         if apply_stage_1:
             print("Processing images (Stage 1)")
-            last_result = stage1_process(img_data, gamma_correction, model_select, ckpt_select, unload=True, progress=progress)
+            last_result = stage1_process(img_data, gamma_correction, model_select, ckpt_select, unload=True,diff_dtype=diff_dtype, ae_dtype=ae_dtype, progress=progress)
             img_data = status_container.image_data
         last_result = llava_process(img_data, temperature, top_p, qs, unload=True, progress=progress)
         captions = status_container.llava_captions
