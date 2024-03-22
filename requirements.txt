@@ -1,13 +1,16 @@
 gradio==4.21.0
 gradio_imageslider
 gradio_client
+ffmpeg_progress_yield
+filetype==1.2.0
+k_diffusion
 Markdown==3.5.2
 numpy==1.26.4
 requests==2.31.0
 sentencepiece==0.2.0
 tokenizers # Leave this to be set by the installed transformers version
 uvicorn==0.28.0
-wandb==0.16.4
+wandb
 httpx
 transformers==4.38.2
 accelerate==0.27.2

@@ -126,7 +126,7 @@ model:
           target: torch.nn.Identity
 
     sampler_config:
-      target: sgm.modules.diffusionmodules.sampling.TiledRestoreEDMSampler
+      target: sgm.modules.diffusionmodules.sampling.TiledRestoreDPMPP2MSampler
       params:
         num_steps: 100
         restore_cfg: 4.0

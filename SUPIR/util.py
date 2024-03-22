@@ -1,4 +1,6 @@
 import os
+
+import psutil
 import torch
 import numpy as np
 import cv2
@@ -8,31 +10,26 @@ from torch.nn.functional import interpolate
 from omegaconf import OmegaConf
 from .utils import sd_disable_initialization, models_utils
 from sgm.util import instantiate_from_config
+from ui_helpers import printt
 from SUPIR.utils.model_fetch import get_model
 import CKPT_PTH 
 
-
-config = None
-
-
-def create_model(config_path, device='cpu'):
-    global config
+def create_model(config_path, device='cpu', sampler="DPMPP2M"):
     config = OmegaConf.load(config_path)
+    config.model.params.sampler_config.target = sampler
     with sd_disable_initialization.DisableInitialization(disable_clip=False):
         with sd_disable_initialization.InitializeOnMeta():
             model = instantiate_from_config(config.model)
     #model = model.to(device)
     print(f'Loaded model config from [{config_path}] and moved to {device}')
-    return model
+    return model, config
 
-
-def load_supir_weights(model, supir_sign=None, reload_supir=False, ckpt_dir=None, ckpt=None, vae_file=None):
-    global config
+def load_supir_weights(model, config, diff_dtype, supir_sign=None, reload_supir=False, ckpt_dir=None, ckpt=None, vae_file=None):    
     
     weight_dtype_conversion = {
         'first_stage_model': None,
         'alphas_cumprod': None,
-        '': torch.float16,
+        '': convert_dtype(diff_dtype),
     }   
 
     if reload_supir == False:      
@@ -62,15 +59,8 @@ def load_supir_weights(model, supir_sign=None, reload_supir=False, ckpt_dir=None
             state_dict = models_utils.load_state_dict(model_file)
             with sd_disable_initialization.LoadStateDictOnMeta(state_dict, device=model.device, weight_dtype_conversion=weight_dtype_conversion):
                 models_utils.load_model_weights(model, state_dict, vae_file)             
-    
+    model.sampler = instantiate_from_config(config.model.params.sampler_config)
     return model
-
-
-def load_QF_ckpt(config_path, device='cpu'):
-    config = OmegaConf.load(config_path)
-    ckpt_F = torch.load(CKPT_PTH.SUPIR_CKPT_F_PTH, map_location=device)
-    ckpt_Q = torch.load(CKPT_PTH.SUPIR_CKPT_Q_PTH, map_location=device)
-    return ckpt_Q, ckpt_F
 
 
 def PIL2Tensor(img, upsacle=1, min_size=1024):
@@ -83,11 +73,14 @@ def PIL2Tensor(img, upsacle=1, min_size=1024):
     h *= upsacle
     w0, h0 = round(w), round(h)
     if min(w, h) < min_size:
-        _upsacle = min_size / min(w, h)
-        w *= _upsacle
-        h *= _upsacle
-    else:
-        _upsacle = 1
+        _upscale = min_size / min(w, h)
+        w *= _upscale
+        h *= _upscale
+    if fix_resize is not None:
+        _upscale = fix_resize / min(w, h)
+        w *= _upscale
+        h *= _upscale
+        w0, h0 = round(w), round(h)
     w = int(np.round(w / 64.0)) * 64
     h = int(np.round(h / 64.0)) * 64
     x = img.resize((w, h), Image.BICUBIC)
