@@ -1,4 +1,4 @@
-gradio==4.21.0
+gradio==4.19.0
 gradio_imageslider
 gradio_client
 ffmpeg_progress_yield
