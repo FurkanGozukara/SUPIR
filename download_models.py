@@ -50,6 +50,7 @@ def download_file(url, folder_path, file_name=None):
 # Define the folders and their corresponding file URLs with optional file names
 checkpoint_files = {
     CHECKPOINT_DIR: [
+        ('https://civitai.com/api/download/models/360292?token=22c5b4cb1989d2c3ff29f222d2840884','WildCardX_XL_Lightning.safetensors')
         ('https://huggingface.co/RunDiffusion/Juggernaut-XL-v9/resolve/main/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors', 'Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors'),
         ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0F.ckpt', 'SUPIR-v0F.ckpt'),
         ('https://huggingface.co/ashleykleynhans/SUPIR/resolve/main/SUPIR-v0Q.ckpt', 'SUPIR-v0Q.ckpt')        
