@@ -62,6 +62,7 @@ model:
         context_dim: 2048
         spatial_transformer_attn_type: softmax-xformers
         legacy: False
+        use_fp16: True
 
     conditioner_config:
       target: sgm.modules.GeneralConditionerWithControl
@@ -149,8 +150,8 @@ model:
         unreal engine, blurring, dirty, messy, worst quality, low quality, frames, watermark, signature, 
         jpeg artifacts, deformed, lowres, over-smooth'
 
-SDXL_CKPT: models/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors
-SUPIR_CKPT_F: models/v0F.ckpt
-SUPIR_CKPT_Q: models/v0Q.ckpt
+SDXL_CKPT: Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors
+SUPIR_CKPT_F: SUPIR-v0F.ckpt
+SUPIR_CKPT_Q: SUPIR-v0Q.ckpt
 SUPIR_CKPT: ~
 

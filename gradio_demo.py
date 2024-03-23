@@ -18,16 +18,18 @@ from PIL import Image
 from PIL import PngImagePlugin
 from gradio_imageslider import ImageSlider
 from SUPIR.utils.rename_meta import rename_meta_key
-
+from omegaconf import OmegaConf
 import ui_helpers
 from SUPIR.models.SUPIR_model import SUPIRModel
-from SUPIR.util import HWC3, upscale_image, convert_dtype
-from SUPIR.util import create_SUPIR_model
+from SUPIR.util import HWC3, upscale_image, fix_resize, convert_dtype
+from SUPIR.util import create_model, load_supir_weights
 from SUPIR.utils.compare import create_comparison_video
 from SUPIR.utils.face_restoration_helper import FaceRestoreHelper
 from SUPIR.utils.model_fetch import get_model
 from SUPIR.utils.status_container import StatusContainer, MediaData
+from SUPIR.utils import shared, devices
 from llava.llava_agent import LLavaAgent
+import CKPT_PTH
 from ui_helpers import is_video, extract_video, compile_video, is_image, get_video_params, printt
 
 SUPIR_REVISION = "v42"
@@ -37,13 +39,13 @@ parser.add_argument("--ip", type=str, default='127.0.0.1', help="IP address for 
 parser.add_argument("--share", type=str, default=False, help="Set to True to share the app publicly.")
 parser.add_argument("--port", type=int, help="Port number for the server to listen on.")
 parser.add_argument("--log_history", action='store_true', default=False, help="Enable logging of request history.")
-parser.add_argument("--loading_half_params", action='store_true', default=False,
-                    help="Enable loading model parameters in half precision to reduce memory usage.")
+parser.add_argument("--loading_half_params", action='store_true', default=False, help="Enable loading model parameters in FP16 precision to reduce memory usage.")
+parser.add_argument("--fp8", action='store_true', default=False, help="Enable loading model parameters in FP8 precision to reduce memory usage.")
 parser.add_argument("--use_tile_vae", action='store_true', default=True,
                     help="Enable tiling for the VAE to handle larger images with limited memory.")
-parser.add_argument("--outputs_folder_button", type=str, default=False, help="Outputs Folder Button Will Be Enabled")
 parser.add_argument("--use_fast_tile", action='store_true', default=False,
                     help="Use a faster tile encoding/decoding, may impact quality.")
+parser.add_argument("--outputs_folder_button", type=str, default=False, help="Outputs Folder Button Will Be Enabled")
 parser.add_argument("--encoder_tile_size", type=int, default=512,
                     help="Tile size for the encoder. Larger sizes may improve quality but require more memory.")
 parser.add_argument("--decoder_tile_size", type=int, default=64,
@@ -52,11 +54,10 @@ parser.add_argument("--load_8bit_llava", action='store_true', default=False,
                     help="Load the LLAMA model in 8-bit precision to save memory.")
 parser.add_argument("--load_4bit_llava", action='store_true', default=True,
                     help="Load the LLAMA model in 4-bit precision to significantly reduce memory usage.")
-parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors',
-                    help="Path to the checkpoint file for the model.")
 parser.add_argument("--ckpt_browser", action='store_true', default=True, help="Enable a checkpoint selection dropdown.")
-parser.add_argument("--ckpt_dir", type=str, default='models/checkpoints',
-                    help="Directory where model checkpoints are stored.")
+parser.add_argument("--ckpt_dir", type=str, default='models',
+                    help="Directory where models and checkpoints are stored.")
+parser.add_argument("--ckpt_dir2", type=str, default=None, help="Alternative directory for big models will be stored.")
 parser.add_argument("--theme", type=str, default='default',
                     help="Theme for the UI. Use 'default' or specify a custom theme.")
 parser.add_argument("--open_browser", action='store_true', default=True,
@@ -76,7 +77,7 @@ video_end = 0
 last_input_path = None
 last_video_params = None
 meta_upload = False
-
+bf16_supported = torch.cuda.is_bf16_supported()
 total_vram = 100000
 auto_unload = False
 if torch.cuda.is_available():
@@ -87,18 +88,34 @@ if torch.cuda.is_available():
     auto_unload = total_vram <= 12
 
     if total_vram <= 24:
-        args.loading_half_params = True
+        args.loading_half_params   = True
         args.use_tile_vae = True
-        print("Loading half params")
+        print("Loading low vram params")
+
+shared.opts.half_mode = args.loading_half_params  
+
+if args.fp8:
+    shared.opts.half_mode = args.fp8
+    shared.opts.fp8_storage = args.fp8
 
 server_ip = args.ip
+model_path = None
+model_path2 = None
+
 if args.debug:
     args.open_browser = False
 
-if args.ckpt_dir == "models/checkpoints":
-    args.ckpt_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
+if args.ckpt_dir is not None:
+    args.ckpt_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir, 'checkpoints')
     if not os.path.exists(args.ckpt_dir):
         os.makedirs(args.ckpt_dir, exist_ok=True)
+
+model_path = os.path.split(args.ckpt_dir)[0]
+model_path2 = model_path if args.ckpt_dir2 is None else args.ckpt_dir2
+CKPT_PTH.setModelsPath(model_path, model_path2)
+
+#get default from repo if not exists yet
+default_sdxl_model = get_model(CKPT_PTH.DEFAULT_SDXL_PATH)
 
 if torch.cuda.device_count() >= 2:
     SUPIR_device = 'cuda:0'
@@ -112,6 +129,7 @@ else:
 
 face_helper = None
 model: SUPIRModel = None
+config: OmegaConf = None
 llava_agent = None
 models_loaded = False
 unique_counter = 0
@@ -204,19 +222,15 @@ def set_info_attributes(elements_to_set: Dict[str, Any]):
 def list_models():
     model_dir = args.ckpt_dir
     output = []
+    output.append(CKPT_PTH.DEFAULT_SDXL_PATH.split('/')[-1])
+
     if os.path.exists(model_dir):
-        output = [os.path.join(model_dir, f) for f in os.listdir(model_dir) if
-                  f.endswith('.safetensors') or f.endswith('.ckpt')]
+        output = [f for f in os.listdir(model_dir) if ((f.endswith('.safetensors') or f.endswith('.ckpt')) and 'SUPIR-v0F.ckpt' not in f and 'SUPIR-v0Q.ckpt' not in f)]
     else:
         local_model_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
         if os.path.exists(local_model_dir):
-            output = [os.path.join(local_model_dir, f) for f in os.listdir(local_model_dir) if
-                      f.endswith('.safetensors') or f.endswith('.ckpt')]
-    if os.path.exists(args.ckpt) and args.ckpt not in output:
-        output.append(args.ckpt)
-    else:
-        if os.path.exists(os.path.join(os.path.dirname(__file__), args.ckpt)):
-            output.append(os.path.join(os.path.dirname(__file__), args.ckpt))
+            output = [f for f in os.listdir(local_model_dir) if ((f.endswith('.safetensors') or f.endswith('.ckpt')) and 'SUPIR-v0F.ckpt' not in f and 'SUPIR-v0Q.ckpt' not in f)]
+   
     # Sort the models
     output = [os.path.basename(f) for f in output]
     # Ensure the values are unique
@@ -275,8 +289,8 @@ def list_styles():
 
 def selected_model():
     models = list_models()
-    target_model = args.ckpt
-    if os.path.basename(target_model) in models:
+    target_model = CKPT_PTH.DEFAULT_SDXL_PATH.split('/')[-1]
+    if target_model in models:
         return target_model
     else:
         if len(models) > 0:
@@ -296,49 +310,43 @@ def load_face_helper():
         )
 
 
-def load_model(selected_model, selected_checkpoint, sampler='DPMPP2M', device='cpu', progress=gr.Progress()):
-    global model, last_used_checkpoint
+def load_model(selected_model, diff_dtype, selected_checkpoint, sampler='DPMPP2M', device='cpu', progress=gr.Progress()):
+    global model, config, last_used_checkpoint
+    checkpoint_use = default_sdxl_model
+    if selected_checkpoint:
+        checkpoint_use = os.path.join(args.ckpt_dir, selected_checkpoint)
+        if last_used_checkpoint is None:
+            last_used_checkpoint = checkpoint_use
 
-    # Determine the need for model loading or updating
-    need_to_load_model = last_used_checkpoint is None or last_used_checkpoint != selected_checkpoint
-    need_to_update_model = selected_model != (model.current_model if model else None)
-    if need_to_update_model:
-        del model
+    if last_used_checkpoint != checkpoint_use:
         model = None
-
-    # Resolve checkpoint path
-    checkpoint_paths = [
-        selected_checkpoint,
-        os.path.join(args.ckpt_dir, selected_checkpoint),
-        os.path.join(os.path.dirname(__file__), args.ckpt_dir, selected_checkpoint)
-    ]
-    checkpoint_use = next((path for path in checkpoint_paths if os.path.exists(path)), None)
-    if checkpoint_use is None:
-        raise FileNotFoundError(f"Checkpoint {selected_checkpoint} not found.")
-
-    # Check if we need to load a new model
-    if need_to_load_model or model is None:
-        torch.cuda.empty_cache()
+        devices.torch_gc()
         last_used_checkpoint = checkpoint_use
-        model_cfg = "options/SUPIR_v0_tiled.yaml" if args.use_tile_vae else "options/SUPIR_v0.yaml"
-        model = create_SUPIR_model(model_cfg, supir_sign=selected_model[-1], device=device, ckpt=checkpoint_use,
-                                   sampler=sampler)
-        model.current_model = selected_model
-        if args.loading_half_params:
-            model = model.half()
+    reload_supir = (selected_model != model.current_model) if hasattr(model, 'current_model') and not model is None else False
+    if model is None or reload_supir:  
+        if progress is not None:
+            progress(1 / 2, desc="Loading SUPIR...")
+
+        if reload_supir == False:
+            model, config = create_model(f"options/{'SUPIR_v0_tiled.yaml' if args.use_tile_vae else 'SUPIR_v0.yaml'}", device, sampler)   
+
+        diff_dtype = 'fp16' if bf16_supported == False else diff_dtype
+        model = load_supir_weights(model, config, diff_dtype, supir_sign=selected_model[-1], reload_supir=reload_supir,
+                                   ckpt_dir=args.ckpt_dir, ckpt=checkpoint_use, vae_file=None)
         if args.use_tile_vae:
             model.init_tile_vae(encoder_tile_size=512, decoder_tile_size=64, use_fast=args.use_fast_tile)
-        if progress is not None:
-            progress(1, desc="SUPIR loaded.")
+       
+        #model.first_stage_model.denoise_encoder_s1 = copy.deepcopy(model.first_stage_model.denoise_encoder)
+        model.current_model = selected_model
 
+    if progress is not None:
+        progress(2 / 2, desc="SUPIR loaded.")
 
 def load_llava():
     global llava_agent
     if llava_agent is None:
-        llava_path = get_model('liuhaotian/llava-v1.5-7b')
-        llava_agent = LLavaAgent(llava_path, device=LLaVA_device, load_8bit=args.load_8bit_llava,
-                                 load_4bit=args.load_4bit_llava)
-
+        llava_path = get_model(CKPT_PTH.LLAVA_MODEL_PATH)
+        llava_agent = LLavaAgent(llava_path, device=LLaVA_device, load_8bit=args.load_8bit_llava, load_4bit=args.load_4bit_llava)
 
 def unload_llava():
     global llava_agent
@@ -349,17 +357,14 @@ def unload_llava():
     else:
         printt("Unloading LLaVA.")
         llava_agent = llava_agent.to('cpu')
-        gc.collect()
-        torch.cuda.empty_cache()
+        devices.torch_gc()
         printt("LLaVA unloaded.")
-
 
 def clear_llava():
     global llava_agent
     del llava_agent
     llava_agent = None
-    gc.collect()
-    torch.cuda.empty_cache()
+    devices.torch_gc()
 
 
 def all_to_cpu_background():
@@ -376,8 +381,7 @@ def all_to_cpu_background():
         printt("Model moved to CPU")
     if llava_agent is not None:
         unload_llava()
-    gc.collect()
-    torch.cuda.empty_cache()
+    devices.torch_gc()
     printt("All moved to CPU")
 
 
@@ -780,7 +784,6 @@ def start_batch_process(*element_values):
         is_processing = False
     return result
 
-
 def llava_process(inputs: List[MediaData], temp, p, question=None, save_captions=False, progress=gr.Progress()):
     global llava_agent, status_container
     outputs = []
@@ -818,7 +821,6 @@ def llava_process(inputs: List[MediaData], temp, p, question=None, save_captions
     status_container.image_data = outputs
     return f"LLaVA Processing Completed: {len(inputs)} images processed at {time.ctime()}."
 
-
 # video_start_time_number, video_current_time_number, video_end_time_number,
 #                      video_fps_number, video_total_frames_number, src_input_file, upscale_slider
 def update_video_slider(start_time, current_time, end_time, fps, total_frames, src_file, upscale_size):
@@ -846,13 +848,13 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
         total_progress += 1
     counter = 0
     progress(counter / total_progress, desc="Loading SUPIR Model...")
-    load_model(model_select, ckpt_select, sampler, progress=progress)
+    load_model(model_select, diff_dtype, ckpt_select, sampler, progress=progress)
     to_gpu(model, SUPIR_device)
 
     counter += 1
     progress(counter / total_progress, desc="Model Loaded, Processing Images...")
-    model.ae_dtype = convert_dtype(ae_dtype)
-    model.model.dtype = convert_dtype(diff_dtype)
+    model.ae_dtype = convert_dtype('fp32' if bf16_supported == False else ae_dtype)
+    model.model.dtype = convert_dtype('fp16' if bf16_supported == False else diff_dtype)
 
     idx = 0
     output_data = []
@@ -933,7 +935,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                                                 num_samples=num_samples, p_p=a_prompt, n_p=n_prompt,
                                                 color_fix_type=color_fix_type,
                                                 use_linear_cfg=linear_cfg, use_linear_control_scale=linear_s_stage2,
-                                                cfg_scale_start=spt_linear_cfg, control_scale_start=spt_linear_s_stage2)
+                                                cfg_scale_start=spt_linear_cfg, control_scale_start=spt_linear_s_stage2, sampler_cls=sampler)
 
                 if is_face and face_resolution < 1024:
                     samples = samples[:, :, 512 - face_resolution // 2:512 + face_resolution // 2,
@@ -1217,7 +1219,6 @@ def save_image(image_data: MediaData, is_video_frame: bool):
     image_data.outputs = result_paths
     return image_data
 
-
 def save_compare_video(image_data: MediaData, params):
     image_path = image_data.media_path
     output_dir = params.get('outputs_folder', args.outputs_folder)
@@ -1240,7 +1241,6 @@ def save_compare_video(image_data: MediaData, params):
     create_comparison_video(org_image_absolute_path, full_save_image_path, video_path, params)
     image_data.comparison_video = video_path
     return image_data
-
 
 def stop_batch_upscale(progress=gr.Progress()):
     global is_processing
@@ -1762,6 +1762,8 @@ with (block):
     slider_dl_button.click(js="downloadImage", show_progress=False, queue=True, fn=do_nothing)
 
 if args.port is not None:  # Check if the --port argument is provided
-    block.launch(server_name=server_ip, server_port=args.port, share=args.share, inbrowser=args.open_browser)
+    block.launch(server_name=server_ip, server_port=args.port, share=args.share, inbrowser=args.open_browser)    
 else:
     block.launch(server_name=server_ip, share=args.share, inbrowser=args.open_browser)
+
+   

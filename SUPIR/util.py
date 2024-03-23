@@ -4,71 +4,66 @@ import psutil
 import torch
 import numpy as np
 import cv2
+
 from PIL import Image
 from torch.nn.functional import interpolate
 from omegaconf import OmegaConf
+from .utils import sd_disable_initialization, models_utils
 from sgm.util import instantiate_from_config
 from ui_helpers import printt
+from SUPIR.utils.model_fetch import get_model
+import CKPT_PTH 
 
-
-def get_state_dict(d):
-    return d.get('state_dict', d)
-
-
-def load_state_dict(ckpt_path, location='cpu'):
-    _, extension = os.path.splitext(ckpt_path)
-    if extension.lower() == ".safetensors":
-        import safetensors.torch
-        state_dict = safetensors.torch.load_file(ckpt_path, device=location)
-    else:
-        state_dict = get_state_dict(torch.load(ckpt_path, map_location=torch.device(location)))
-    state_dict = get_state_dict(state_dict)
-    print(f'Loaded state_dict from [{ckpt_path}]')
-    return state_dict
-
-
-def create_SUPIR_model(config_path, supir_sign=None, device='cpu', ckpt=None, sampler="DPMPP2M"):
-    # Load the model configuration
+def create_model(config_path, device='cpu', sampler="DPMPP2M"):
     config = OmegaConf.load(config_path)
     config.model.params.sampler_config.target = sampler
-    if ckpt:
-        config.SDXL_CKPT = ckpt
+    with sd_disable_initialization.DisableInitialization(disable_clip=False):
+        with sd_disable_initialization.InitializeOnMeta():
+            model = instantiate_from_config(config.model)
+    #model = model.to(device)
+    print(f'Loaded model config from [{config_path}] and moved to {device}')
+    return model, config
 
-    # Instantiate model from config
-    printt(f'Loading model from [{config_path}]')
-    model = instantiate_from_config(config.model)
-    printt(f'Loaded model from [{config_path}]')
+def load_supir_weights(model, config, diff_dtype, supir_sign=None, reload_supir=False, ckpt_dir=None, ckpt=None, vae_file=None):    
+    
+    weight_dtype_conversion = {
+        'first_stage_model': None,
+        'alphas_cumprod': None,
+        '': convert_dtype(diff_dtype),
+    }   
 
-    # Function to load state dict to the chosen device
-    def load_to_device(ckpt_path):
-        printt(f'Loading state_dict from [{ckpt_path}]')
-        if ckpt_path and os.path.exists(ckpt_path):
-            if torch.cuda.is_available():
-                tgt_device = 'cuda'
-            else:
-                tgt_device = 'cpu'
-            state_dict = load_state_dict(ckpt_path, tgt_device)
-            model.load_state_dict(state_dict, strict=False)
-            printt(f'Loaded state_dict from [{ckpt_path}]')
-        else:
-            printt(f'No checkpoint found at [{ckpt_path}]')
+    if reload_supir == False:      
+        if ckpt:
+            config.SDXL_CKPT = ckpt
 
-    # Load state dicts as needed
-    load_to_device(config.get('SDXL_CKPT'))
+        if config.SDXL_CKPT is not None:       
+            state_dict = models_utils.load_state_dict(config.SDXL_CKPT)    
+            with sd_disable_initialization.LoadStateDictOnMeta(state_dict, device=model.device, weight_dtype_conversion=weight_dtype_conversion):
+                models_utils.load_model_weights(model, state_dict, vae_file)        
 
-    # Handling SUPIR checkpoints based on the sign
-    if supir_sign:
-        assert supir_sign in ['F', 'Q'], "supir_sign must be either 'F' or 'Q'"
-        ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models", f"v0{supir_sign}.ckpt"))
-        load_to_device(ckpt_path)
+        if config.SUPIR_CKPT is not None:
+            model_file = get_model(os.path.join(ckpt_dir, config.SUPIR_CKPT))
+            state_dict = models_utils.load_state_dict(model_file)
+            with sd_disable_initialization.LoadStateDictOnMeta(state_dict, device=model.device, weight_dtype_conversion=weight_dtype_conversion):
+                models_utils.load_model_weights(model, state_dict, vae_file) 
 
-    model.sampler = sampler
-    printt(f'Loaded model config from [{config_path}] and moved to {device}')
-
+    if supir_sign is not None:
+        assert supir_sign in ['F', 'Q']
+        if supir_sign == 'F':            
+            model_file = get_model(CKPT_PTH.SUPIR_CKPT_F_PTH)
+            state_dict = models_utils.load_state_dict(model_file)
+            with sd_disable_initialization.LoadStateDictOnMeta(state_dict, device=model.device, weight_dtype_conversion=weight_dtype_conversion):
+                models_utils.load_model_weights(model, state_dict,vae_file) 
+        elif supir_sign == 'Q':
+            model_file = get_model(CKPT_PTH.SUPIR_CKPT_Q_PTH)            
+            state_dict = models_utils.load_state_dict(model_file)
+            with sd_disable_initialization.LoadStateDictOnMeta(state_dict, device=model.device, weight_dtype_conversion=weight_dtype_conversion):
+                models_utils.load_model_weights(model, state_dict, vae_file)             
+    model.sampler = instantiate_from_config(config.model.params.sampler_config)
     return model
 
 
-def PIL2Tensor(img, upsacle=1, min_size=1024, fix_resize=None):
+def PIL2Tensor(img, upsacle=1, min_size=1024):
     '''
     PIL.Image -> Tensor[C, H, W], RGB, [-1, 1]
     '''
@@ -179,6 +174,8 @@ def Tensor2Numpy(x, h0=None, w0=None):
 
 
 def convert_dtype(dtype_str):
+    if dtype_str == 'fp8':
+        return torch.float8_e5m2
     if dtype_str == 'fp32':
         return torch.float32
     elif dtype_str == 'fp16':
@@ -187,3 +184,4 @@ def convert_dtype(dtype_str):
         return torch.bfloat16
     else:
         raise NotImplementedError
+

@@ -1,4 +1,20 @@
-LLAVA_CLIP_PATH = 'models/clip-vit-large-patch14-336'
-LLAVA_MODEL_PATH = 'models/llava-v1.5-7b'
-SDXL_CLIP1_PATH = 'models/clip-vit-large-patch14'
-SDXL_CLIP2_CKPT_PTH = 'models/open_clip_pytorch_model.bin'
+DEFAULT_SDXL_PATH = None
+LLAVA_CLIP_PATH = None
+LLAVA_MODEL_PATH = None
+SDXL_CLIP1_PATH = None
+SDXL_CLIP2_CKPT_PTH = None
+SUPIR_CKPT_F_PTH = None
+SUPIR_CKPT_Q_PTH = None
+
+def setModelsPath(model_path, model_path2):    
+    global DEFAULT_SDXL_PATH, LLAVA_CLIP_PATH, LLAVA_MODEL_PATH, SDXL_CLIP1_PATH, SDXL_CLIP2_CKPT_PTH, SUPIR_CKPT_F_PTH, SUPIR_CKPT_Q_PTH
+
+    LLAVA_CLIP_PATH = fr'{model_path}/openai/clip-vit-large-patch14-336' if model_path is not None else 'openai/clip-vit-large-patch14-336'
+    LLAVA_MODEL_PATH = fr'{model_path}/liuhaotian/llava-v1.5-7b' if model_path is not None else 'liuhaotian/llava-v1.5-7b'
+    SDXL_CLIP1_PATH = fr'{model_path}/openai/clip-vit-large-patch14' if model_path is not None else 'openai/clip-vit-large-patch14'
+    SDXL_CLIP2_CKPT_PTH = fr'{model_path2}/laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/open_clip_pytorch_model.bin' if model_path2 is not None else 'laion/CLIP-ViT-bigG-14-laion2B-39B-b160k/open_clip_pytorch_model.bin'
+    DEFAULT_SDXL_PATH = fr'{model_path}/checkpoints/RunDiffusion/Juggernaut-XL-v9/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors' if model_path is not None else 'RunDiffusion/Juggernaut-XL-v9/Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors' 
+    SUPIR_CKPT_F_PTH = fr'{model_path}/checkpoints/ashleykleynhans/SUPIR/SUPIR-v0F.ckpt' if model_path is not None else 'ashleykleynhans/SUPIR/SUPIR-v0F.ckpt' 
+    SUPIR_CKPT_Q_PTH = fr'{model_path}/checkpoints/ashleykleynhans/SUPIR/SUPIR-v0Q.ckpt' if model_path is not None else 'ashleykleynhans/SUPIR/SUPIR-v0Q.ckpt' 
+    
+

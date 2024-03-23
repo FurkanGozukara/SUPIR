@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from transformers import CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig
-from CKPT_PTH import LLAVA_CLIP_PATH
+import CKPT_PTH
 from SUPIR.utils.model_fetch import get_model
 
 
@@ -17,7 +17,7 @@ class CLIPVisionTower(nn.Module):
         print(f'Loading vision tower: {self.vision_tower_name}')
         self.select_layer = args.mm_vision_select_layer
         self.select_feature = getattr(args, 'mm_vision_select_feature', 'patch')
-        llava_path = get_model("openai/clip-vit-large-patch14-336")
+        llava_path = get_model(CKPT_PTH.LLAVA_CLIP_PATH)
         if not delay_load:
             self.load_model()
         else:
@@ -25,7 +25,7 @@ class CLIPVisionTower(nn.Module):
             self.cfg_only = CLIPVisionConfig.from_pretrained(llava_path)
 
     def load_model(self):
-        llava_path = get_model("openai/clip-vit-large-patch14-336")
+        llava_path = get_model(CKPT_PTH.LLAVA_CLIP_PATH)
         self.image_processor = CLIPImageProcessor.from_pretrained(llava_path)
         self.vision_tower = CLIPVisionModel.from_pretrained(llava_path)
         self.vision_tower.requires_grad_(False)
