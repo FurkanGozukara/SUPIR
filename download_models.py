@@ -2,7 +2,7 @@ import os
 import requests
 from tqdm import tqdm
 from huggingface_hub import snapshot_download
-
+from concurrent.futures import ThreadPoolExecutor
 
 def create_directory(path):
     """Create directory if it does not exist."""
@@ -11,7 +11,6 @@ def create_directory(path):
         print(f'Directory created: {path}')
     else:
         print(f'Directory already exists: {path}')
-
 
 def download_file(url, folder_path, file_name=None):
     """Download a file from a given URL to a specified folder with an optional file name."""
@@ -47,13 +46,11 @@ def download_file(url, folder_path, file_name=None):
     else:
         print(f'Downloaded {local_filename} to {folder_path}')
 
-
 def get_remote_file_size(url):
     """Get the size of a file at a remote URL."""
     with requests.head(url) as r:
         size = int(r.headers.get('content-length', 0))
     return size
-
 
 # Define the folders and their corresponding file URLs with optional file names
 folders_and_files = {
@@ -64,12 +61,13 @@ folders_and_files = {
     ]
 }
 
-
 if __name__ == '__main__':
     for folder, files in folders_and_files.items():
         create_directory(folder)
-        for file_url, file_name in files:
-            download_file(file_url, folder, file_name)
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(download_file, file_url, folder, file_name) for file_url, file_name in files]
+            for future in futures:
+                future.result()
 
     llava_model = os.getenv('LLAVA_MODEL', 'liuhaotian/llava-v1.5-7b')
     llava_clip_model = 'openai/clip-vit-large-patch14-336'
