@@ -1368,7 +1368,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                   s_stage1, s_stage2, s_cfg, seed, sampler, s_churn, s_noise, color_fix_type, diff_dtype, ae_dtype,
                   linear_cfg, linear_s_stage2, spt_linear_cfg, spt_linear_s_stage2, model_select,
                   ckpt_select, num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
-                  face_prompt, max_megapixels, max_resolution, dont_update_progress=False, unload=True,
+                  face_prompt, max_megapixels, max_resolution, first_downscale, dont_update_progress=False, unload=True,
                   progress=gr.Progress()):
     global model, status_container, event_id
     main_begin_time = time.time()
@@ -1398,6 +1398,8 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
             linear_cfg = linear_cfg.lower() == 'true'
         if isinstance(linear_s_stage2, str):
             linear_s_stage2 = linear_s_stage2.lower() == 'true'
+        if isinstance(first_downscale, str):
+            first_downscale = first_downscale.lower() == 'true'
     except (ValueError, TypeError) as e:
         print(f"Error converting parameters: {e}")
         # Provide default values in case of conversion errors
@@ -1486,6 +1488,28 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
         
         # Calculate final upscale factor
         final_upscale = min(target_h / h, target_w / w)
+        
+        # Apply first downscale logic if enabled
+        if first_downscale:
+            # Calculate the target resolution after constraints
+            final_target_h = int(target_h)
+            final_target_w = int(target_w)
+            
+            # First, downscale the image to match the target resolution divided by upscale factor
+            # This ensures that when we upscale by the specified factor, we get the exact target resolution
+            downscale_target_h = int(final_target_h / upscale)
+            downscale_target_w = int(final_target_w / upscale)
+            
+            printt(f"First Downscale enabled: Downscaling to {downscale_target_w}x{downscale_target_h}, then upscaling {upscale}x to {final_target_w}x{final_target_h}")
+            
+            # Use PIL Image for high-quality Lanczos downscaling
+            img_pil = Image.fromarray(img.astype('uint8'))
+            img_pil_downscaled = img_pil.resize((downscale_target_w, downscale_target_h), Image.LANCZOS)
+            img = np.array(img_pil_downscaled)
+            
+            # Now set the final upscale to exactly the specified upscale factor
+            final_upscale = float(upscale)
+        
         printt(f"Final upscale factor: {final_upscale:.2f}")
         
         img = upscale_image(img, final_upscale, unit_resolution=32, min_size=1024)
@@ -1706,7 +1730,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
 
 def batch_process(img_data,
                   a_prompt, ae_dtype, apply_bg, apply_face, apply_llava, apply_supir, ckpt_select, color_fix_type,
-                  diff_dtype, edm_steps, face_prompt, face_resolution, linear_CFG, linear_s_stage2,
+                  diff_dtype, edm_steps, face_prompt, face_resolution, first_downscale, linear_CFG, linear_s_stage2,
                   make_comparison_video, model_select, n_prompt, num_images, num_samples, qs, random_seed,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
                   spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, progress=gr.Progress()
@@ -1745,6 +1769,8 @@ def batch_process(img_data,
             save_captions = save_captions.lower() == 'true'
         if isinstance(auto_unload_llava, str):
             auto_unload_llava = auto_unload_llava.lower() == 'true'
+        if isinstance(first_downscale, str):
+            first_downscale = first_downscale.lower() == 'true'
     except (ValueError, TypeError) as e:
         print(f"Error converting parameters in batch_process: {e}")
         # Continue with original values if conversion fails
@@ -1824,7 +1850,7 @@ def batch_process(img_data,
                                     linear_CFG, linear_s_stage2, spt_linear_CFG, spt_linear_s_stage2, model_select,
                                     ckpt_select,
                                     num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
-                                    face_prompt, max_megapixels, max_resolution, unload=True, progress=progress)
+                                    face_prompt, max_megapixels, max_resolution, first_downscale, unload=True, progress=progress)
         printt("Processing images (Stage 2) Completed")
     counter += total_supir_steps
     progress(counter / total_steps, desc="Processing completed.")
@@ -2183,7 +2209,7 @@ selected_pos, selected_neg, llava_style_prompt = select_style(
 block = gr.Blocks(title='SUPIR', theme=args.theme, css=css_file, head=head).queue()
 
 with (block):
-    gr.Markdown("SUPIR V75 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V80 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2249,6 +2275,8 @@ with (block):
                     with gr.Row():
                         upscale_slider = gr.Slider(label="Upscale Size", minimum=1, maximum=20, value=1, step=0.1,
                                                   info="Base upscale factor. Image will be scaled by this amount, then constrained by Max Megapixels and Max Resolution if set. Set like 20x upscale and limit resolution with Max Megapixels and Max Resolution if you need.")
+                        first_downscale_checkbox = gr.Checkbox(label="First Downscale to Match Target Upscale Size", value=False,
+                                                             info="When enabled, the image is first downscaled using high-quality Lanczos algorithm to match the target resolution (after max megapixel/resolution constraints), then upscaled by the specified factor. This can help achieve more consistent results when working with size-constrained outputs.")
                     with gr.Row():
                         max_mp_slider = gr.Slider(label="Max Megapixels (0 = no limit)", minimum=0, maximum=100, value=0, step=1,
                                                  info="Limit output megapixels. Output will be constrained by Max Megapixels and Max Resolution if set. Note: Minimum dimension will always be at least 1024px.",
@@ -2719,6 +2747,7 @@ with (block):
         "edm_steps": edm_steps_slider,
         "face_prompt": face_prompt_textbox,
         "face_resolution": face_resolution_slider,
+        "first_downscale": first_downscale_checkbox,
         "linear_CFG": linear_cfg_checkbox,
         "linear_s_stage2": linear_s_stage2_checkbox,
         "main_prompt": prompt_textbox,
@@ -2801,6 +2830,8 @@ with (block):
     submit_button.click(fn=submit_feedback, inputs=[event_id, fb_score, fb_text], outputs=[fb_text])
     upscale_slider.change(fn=update_target_resolution, inputs=[src_image_display, upscale_slider, max_mp_slider, max_res_slider],
                           outputs=[target_res_textbox])
+    first_downscale_checkbox.change(fn=update_target_resolution, inputs=[src_image_display, upscale_slider, max_mp_slider, max_res_slider],
+                                   outputs=[target_res_textbox])
     
     # Remove previous handlers that aren't working
     # Add new handlers with explicit update logic
