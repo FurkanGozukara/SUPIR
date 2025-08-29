@@ -526,6 +526,171 @@ single_process = False
 is_processing = False
 last_used_checkpoint = None
 
+# Batch progress tracking variables
+batch_start_time = None
+batch_processed_count = 0
+batch_total_count = 0
+batch_processing_times = []
+batch_current_stage = ""
+
+
+def get_batch_progress_html():
+    """Generate HTML for persistent batch progress display"""
+    global batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage
+    
+    if not is_processing or batch_total_count == 0:
+        return ""
+    
+    # Calculate metrics
+    remaining = batch_total_count - batch_processed_count
+    
+    # Calculate average processing time and ETA
+    avg_time = 0
+    eta_text = "Calculating..."
+    if len(batch_processing_times) > 0:
+        avg_time = sum(batch_processing_times) / len(batch_processing_times)
+        if remaining > 0:
+            eta_seconds = remaining * avg_time
+            eta_minutes = int(eta_seconds // 60)
+            eta_secs = int(eta_seconds % 60)
+            eta_text = f"{eta_minutes}m {eta_secs}s"
+        else:
+            eta_text = "Complete"
+    
+    # Calculate elapsed time
+    elapsed = "0m 0s"
+    if batch_start_time:
+        elapsed_seconds = time.time() - batch_start_time
+        elapsed_minutes = int(elapsed_seconds // 60)
+        elapsed_secs = int(elapsed_seconds % 60)
+        elapsed = f"{elapsed_minutes}m {elapsed_secs}s"
+    
+    # Progress percentage
+    progress_percent = (batch_processed_count / batch_total_count * 100) if batch_total_count > 0 else 0
+    
+    html = f"""
+    <div style="
+        position: fixed !important;
+        top: 120px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        width: 90vw !important;
+        max-width: 1200px !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
+        color: white !important; 
+        padding: 16px !important; 
+        border-radius: 12px !important; 
+        font-family: 'Segoe UI', Arial, sans-serif !important; 
+        box-shadow: 0 8px 32px rgba(0,0,0,0.8) !important;
+        border: 3px solid #4299e1 !important;
+        z-index: 9999999 !important;
+        pointer-events: none !important;
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                🚀 BATCH PROCESSING
+            </h2>
+            <div style="background: rgba(255,255,255,0.25); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; backdrop-filter: blur(10px);">
+                {batch_processed_count}/{batch_total_count} ({progress_percent:.1f}%)
+            </div>
+        </div>
+        
+        <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 10px; margin-bottom: 12px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
+            <div style="background: linear-gradient(90deg, #4CAF50, #8BC34A, #CDDC39); height: 100%; width: {progress_percent}%; border-radius: 10px; transition: width 0.5s ease; box-shadow: 0 2px 8px rgba(76,175,80,0.4);"></div>
+        </div>
+        
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px;">
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
+                <div style="font-size: 16px; font-weight: bold; color: #4CAF50;">⏱️ {avg_time:.1f}s</div>
+                <div style="font-size: 10px; opacity: 0.9;">Avg per Image</div>
+            </div>
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
+                <div style="font-size: 16px; font-weight: bold; color: #FF9800;">🔄 {remaining}</div>
+                <div style="font-size: 10px; opacity: 0.9;">Remaining</div>
+            </div>
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
+                <div style="font-size: 16px; font-weight: bold; color: #E91E63;">⏰ {eta_text}</div>
+                <div style="font-size: 10px; opacity: 0.9;">ETA</div>
+            </div>
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
+                <div style="font-size: 16px; font-weight: bold; color: #2196F3;">📊 {elapsed}</div>
+                <div style="font-size: 10px; opacity: 0.9;">Elapsed</div>
+            </div>
+        </div>
+        
+        <div style="text-align: center; font-size: 12px; color: rgba(255,255,255,0.8); font-style: italic; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px;">
+            {batch_current_stage}
+        </div>
+    </div>
+    """
+    
+    return html
+
+def show_batch_progress():
+    """Function to show/update batch progress display"""
+    if is_processing and batch_total_count > 0:
+        html = get_batch_progress_html()
+        return gr.update(visible=True, value=html)
+    else:
+        return gr.update(visible=False, value="")
+
+def hide_batch_progress():
+    """Function to hide batch progress display"""
+    return gr.update(visible=False, value="")
+
+def start_batch_with_progress(*element_values):
+    """Start batch processing and show progress display"""
+    # Show initial batch progress
+    initial_html = """
+    <div style="
+        position: fixed !important;
+        top: 120px !important;
+        left: 50% !important;
+        transform: translateX(-50%) !important;
+        width: 90vw !important;
+        max-width: 1200px !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
+        color: white !important; 
+        padding: 16px !important; 
+        border-radius: 12px !important; 
+        font-family: 'Segoe UI', Arial, sans-serif !important; 
+        box-shadow: 0 8px 32px rgba(0,0,0,0.8) !important;
+        border: 3px solid #4299e1 !important;
+        z-index: 9999999 !important;
+        pointer-events: none !important;
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                🚀 BATCH STARTING...
+            </h2>
+            <div style="background: rgba(255,255,255,0.25); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; backdrop-filter: blur(10px);">
+                0%
+            </div>
+        </div>
+        
+        <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 10px; margin-bottom: 12px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
+            <div style="background: linear-gradient(90deg, #4CAF50, #8BC34A, #CDDC39); height: 100%; width: 0%; border-radius: 10px; transition: width 0.5s ease; box-shadow: 0 2px 8px rgba(76,175,80,0.4);"></div>
+        </div>
+        
+        <div style="text-align: center; font-size: 14px; color: rgba(255,255,255,0.9); font-style: italic; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px;">
+            🔄 Initializing batch processing...
+        </div>
+    </div>
+    """
+    
+    # Start the actual batch processing
+    result = start_batch_process(*element_values)
+    
+    # Return result and show progress display
+    return result, gr.update(visible=True, value=initial_html)
+
+def stop_batch_with_progress(progress=gr.Progress()):
+    """Stop batch processing and hide progress display"""
+    result = stop_batch_upscale(progress)
+    return result, gr.update(visible=False, value="")
+
+
+
 slider_html = """
 <div id="keyframeSlider" class="keyframe-slider">
   <div id="frameSlider"></div>
@@ -1180,10 +1345,14 @@ def populate_gallery():
 
 
 def start_single_process(*element_values):
-    global status_container, is_processing
+    global status_container, is_processing, batch_total_count, batch_processed_count, batch_processing_times
     # Ensure we start with a clean processing state
     is_processing = False
     status_container = StatusContainer()
+    # Clear any leftover batch tracking variables to ensure progress display is hidden
+    batch_total_count = 0
+    batch_processed_count = 0
+    batch_processing_times = []
     values_dict = zip(elements_dict.keys(), element_values)
     values_dict = dict(values_dict)
     
@@ -1246,14 +1415,23 @@ def start_single_process(*element_values):
     except Exception as e:
         print(f"An exception occurred: {e} at {traceback.format_exc()}")
         is_processing = False
-    return result
+    # Return result and hidden batch progress display for single processing  
+    batch_progress_display = hide_batch_progress()
+    return result, batch_progress_display
 
 
 def start_batch_process(*element_values):
-    global status_container, is_processing
+    global status_container, is_processing, batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage
     # Ensure we start with a clean processing state
     is_processing = False
     status_container = StatusContainer()
+    
+    # Initialize batch progress tracking
+    batch_start_time = None
+    batch_processed_count = 0
+    batch_total_count = 0
+    batch_processing_times = []
+    batch_current_stage = "Initializing..."
     values_dict = zip(elements_dict.keys(), element_values)
     values_dict = dict(values_dict)
     
@@ -1284,6 +1462,10 @@ def start_batch_process(*element_values):
 
     # Store it globally
     status_container.image_data = img_data
+    
+    # Set total count for batch progress tracking
+    batch_total_count = len(img_data)
+    
     result = "An exception occurred. Please try again."
     try:
         keys_to_pop = ['batch_process_folder', 'main_prompt', 'output_video_format',
@@ -1299,7 +1481,9 @@ def start_batch_process(*element_values):
     except Exception as e:
         print(f"An exception occurred: {e} at {traceback.format_exc()}")
         is_processing = False
-    return result
+    # Return both result status and batch progress display
+    batch_progress_display = show_batch_progress()
+    return result, batch_progress_display
 
 
 def llava_process(inputs: List[MediaData], temp, p, question=None, save_captions=False, progress=gr.Progress(), skip_llava_if_txt_exists: bool = True):
@@ -1328,10 +1512,12 @@ def llava_process(inputs: List[MediaData], temp, p, question=None, save_captions
             md.caption = caption
             outputs.append(md)
             step += 1
-            progress(step / total_steps, desc=f"Skipped LLaVA for image {step}/{len(inputs)}, using existing text file")
+            batch_info = f" [BATCH: {batch_processed_count}/{batch_total_count}]" if batch_total_count > 0 else ""
+            progress(step / total_steps, desc=f"Skipped LLaVA for image {step}/{len(inputs)}, using existing text file{batch_info}")
             continue
             
-        progress(step / total_steps, desc=f"Processing image {step}/{len(inputs)} with LLaVA...")
+        batch_info = f" [BATCH: {batch_processed_count}/{batch_total_count}]" if batch_total_count > 0 else ""
+        progress(step / total_steps, desc=f"Processing image {step}/{len(inputs)} with LLaVA...{batch_info}")
         if img is None:  ## this is for llava and video
             img = safe_open_image(img_path)
             img = np.array(img)
@@ -1373,7 +1559,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                   ckpt_select, num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
                   face_prompt, max_megapixels, max_resolution, first_downscale, apply_face_only=False, dont_update_progress=False, unload=True,
                   progress=gr.Progress()):
-    global model, status_container, event_id
+    global model, status_container, event_id, batch_processed_count, batch_processing_times, batch_current_stage, batch_total_count, batch_start_time
     main_begin_time = time.time()
     
     # Ensure all parameters are of the correct type
@@ -1416,12 +1602,14 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
     if unload:
         total_progress += 1
     counter = 0
-    progress(counter / total_progress, desc="Loading SUPIR Model...")
+    batch_info = f" [BATCH: {batch_processed_count}/{batch_total_count} images queued]" if batch_total_count > 0 else ""
+    progress(counter / total_progress, desc=f"Loading SUPIR Model...{batch_info}")
     load_model(model_select, ckpt_select, diff_dtype, sampler, progress=progress)
     to_gpu(model, SUPIR_device)
 
     counter += 1
-    progress(counter / total_progress, desc="Model Loaded, Processing Images...")
+    batch_info = f" [BATCH: {batch_processed_count}/{batch_total_count} images ready]" if batch_total_count > 0 else ""
+    progress(counter / total_progress, desc=f"Model Loaded, Processing Images...{batch_info}")
     model.ae_dtype = convert_dtype('fp32' if bf16_supported == False else ae_dtype)
     model.model.dtype = convert_dtype('fp16' if bf16_supported == False else diff_dtype)
 
@@ -1435,11 +1623,35 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
     params = status_container.process_params
 
     for image_data in inputs:
+        # Track processing time for this image
+        image_start_time = time.time()
+        
         gen_params_list = []
         img_params = params.copy()
         img = image_data.media_data
         image_path = image_data.media_path
-        progress(counter / total_progress, desc=f"Processing image {counter}/{total_images}...")
+        
+        # Update batch progress
+        batch_current_stage = f"Processing image {batch_processed_count + 1}/{batch_total_count}"
+        
+        # Show batch metrics in the progress description where it's always visible
+        batch_info = ""
+        if batch_total_count > 0:
+            if len(batch_processing_times) > 0:
+                avg_time = sum(batch_processing_times) / len(batch_processing_times)
+                remaining = batch_total_count - batch_processed_count
+                elapsed_time = time.time() - batch_start_time if batch_start_time else 0
+                elapsed_mins = int(elapsed_time // 60)
+                if remaining > 0:
+                    eta_seconds = remaining * avg_time
+                    eta_minutes = int(eta_seconds // 60)
+                    batch_info = f" 🚀 BATCH: {batch_processed_count + 1}/{batch_total_count} | {remaining} left | Avg: {avg_time:.1f}s | ETA: {eta_minutes}m | Elapsed: {elapsed_mins}m"
+                else:
+                    batch_info = f" 🚀 BATCH: {batch_processed_count + 1}/{batch_total_count} | Almost done! | Elapsed: {elapsed_mins}m"
+            else:
+                batch_info = f" 🚀 BATCH: {batch_processed_count + 1}/{batch_total_count} | Starting..."
+        
+        progress(counter / total_progress, desc=f"Processing image {counter}/{total_images}...{batch_info}")
         if img is None:
             printt(f"Image {counter}/{total_images} is None, loading from disk.")
             with safe_open_image(image_path) as img:
@@ -1709,10 +1921,34 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
             if result is not None:
                 results.append(result)
                 gen_params_list.append(gen_params)
-            desc = f"Image {counter}/{total_images} upscale completed in {image_generation_time:.2f} seconds"
             counter += 1
+            
+            # Update batch progress tracking
+            image_total_time = time.time() - image_start_time
+            batch_processing_times.append(image_total_time)
+            batch_processed_count += 1
+            
+            # Add batch info to completion message
+            batch_completion_info = ""
+            if batch_total_count > 0:
+                avg_time = sum(batch_processing_times) / len(batch_processing_times)
+                remaining = batch_total_count - batch_processed_count
+                elapsed_time = time.time() - batch_start_time if batch_start_time else 0
+                elapsed_mins = int(elapsed_time // 60)
+                
+                if remaining > 0:
+                    eta_seconds = remaining * avg_time
+                    eta_minutes = int(eta_seconds // 60)
+                    batch_completion_info = f" 🚀 BATCH: {batch_processed_count}/{batch_total_count} DONE | {remaining} left | Avg: {avg_time:.1f}s | ETA: {eta_minutes}m | Elapsed: {elapsed_mins}m"
+                else:
+                    batch_completion_info = f" 🚀 BATCH COMPLETE! All {batch_processed_count} images processed | Total: {elapsed_mins}m"
+            
+            desc = f"Image {counter}/{total_images} completed{batch_completion_info}"
             progress_value = counter / total_images if total_images > 0 else 1.0
             progress(progress_value, desc=desc)
+            
+            # Note: batch_metrics_html will show persistent progress info automatically
+            # The metrics display is updated via the global variables we just modified
 
         # Update outputs
         image_data.outputs = results
@@ -1823,6 +2059,14 @@ def batch_process(img_data,
 
     params = status_container.process_params
     is_processing = True
+    
+    # Initialize batch progress tracking
+    global batch_start_time, batch_processed_count, batch_total_count, batch_current_stage
+    batch_start_time = time.time()
+    batch_processed_count = 0
+    batch_total_count = len(img_data)
+    batch_current_stage = "Starting batch processing..."
+    
     # Get the list of image files in the folder
     total_images = len(img_data)
 
@@ -1841,9 +2085,11 @@ def batch_process(img_data,
     # Disable llava for video...because...uh...yeah, video.
     # if status_container.is_video:
     #   apply_llava = False
-    progress(0, desc=f"Processing {total_images} images...")
+    batch_info = f" 🚀 BATCH: {batch_total_count} images queued for processing" if batch_total_count > 0 else ""
+    progress(0, desc=f"Processing {total_images} images...{batch_info}")
     printt(f"Processing {total_images} images...", reset=True)
     if apply_llava:
+        batch_current_stage = "Processing LLaVA (image captioning)..."
         printt('Processing LLaVA')
         last_result = llava_process(img_data, temperature, top_p, qs, save_captions, progress=progress, skip_llava_if_txt_exists=skip_llava_if_txt_exists)
         printt('LLaVA processing completed')
@@ -1894,6 +2140,7 @@ def batch_process(img_data,
         return f"Batch Processing Completed: Cancelled at {time.ctime()}.", last_result
     counter += total_llava_steps
     if apply_supir:
+        batch_current_stage = "Processing SUPIR (image upscaling)..."
         progress(counter / total_steps, desc="Processing images...")
         printt("Processing images (Stage 2)")
         # Ensure upscale is a float before passing it to supir_process
@@ -1941,7 +2188,14 @@ def batch_process(img_data,
         status_container.image_data = updates
     progress(1, desc="Processing Completed in " + str(time.time() - start_time) + " seconds.")
 
+    # Finalize batch progress tracking
+    batch_current_stage = "Batch processing completed!"
+    
     is_processing = False
+    # Clear batch tracking variables to ensure progress display hides
+    batch_total_count = 0
+    batch_processed_count = 0
+    batch_processing_times = []
     end_time = time.time()
     global unique_counter
     unique_counter = unique_counter + 1
@@ -2062,7 +2316,9 @@ def stop_batch_upscale(progress=gr.Progress()):
     is_processing = False  # Immediately set flag to cancel processing
     progress(1, desc="Cancelling processing... This will take effect immediately.")
     print('\n*** Cancel command received - processing will stop at the next checkpoint ***\n')
-    return "Processing cancelled. Please wait for current operations to stop..."
+    # Hide batch progress when stopping
+    batch_progress_display = hide_batch_progress()
+    return "Processing cancelled. Please wait for current operations to stop...", batch_progress_display
 
 
 def load_and_reset(param_setting):
@@ -2244,6 +2500,26 @@ function downloadImage(sliderId) {{
         alert("Could not find the image source to download.");
     }}
 }}
+
+// Batch progress polling system
+function startBatchProgressPolling() {{
+    setInterval(function() {{
+        const updateBtn = document.getElementById('update_batch_progress_btn');
+        if (updateBtn) {{
+            updateBtn.click();
+        }}
+    }}, 2000); // Poll every 2 seconds
+}}
+
+// Start polling when page loads
+document.addEventListener('DOMContentLoaded', function() {{
+    startBatchProgressPolling();
+}});
+
+// Also start if DOM is already loaded
+if (document.readyState !== 'loading') {{
+    startBatchProgressPolling();
+}}
 </script>
 """
 
@@ -2284,7 +2560,7 @@ selected_pos, selected_neg, llava_style_prompt = select_style(
 block = gr.Blocks(title='SUPIR', theme=args.theme, css=css_file, head=head).queue()
 
 with (block):
-    gr.Markdown("SUPIR V82 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V83 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2302,6 +2578,17 @@ with (block):
         with gr.Column(scale=1):
             with gr.Row():
                 output_label = gr.Label(label="Progress", elem_classes=["progress_label"])
+            with gr.Row():
+                # Batch progress display with ultra-high z-index to override Gradio overlay
+                batch_progress_html = gr.HTML(
+                    value="", 
+                    visible=True, 
+                    show_label=False,
+                    elem_id="batch_progress_display",
+                    elem_classes=["batch_progress_priority"]
+                )
+                # Hidden button for JavaScript polling
+                update_batch_progress_button = gr.Button(visible=False, elem_id="update_batch_progress_btn")
             with gr.Row():
                 target_res_textbox = gr.HTML(value="", visible=True, show_label=False)
         with gr.Row(equal_height=True):
@@ -2886,11 +3173,15 @@ with (block):
 
     elements_extra = list(extra_info_elements.values())
 
-    start_single_button.click(fn=start_single_process, inputs=elements, outputs=output_label,
+    # Batch progress update handler (triggered by JavaScript)
+    update_batch_progress_button.click(fn=show_batch_progress, outputs=batch_progress_html, 
+                                      show_progress=False, queue=False)
+
+    start_single_button.click(fn=start_single_process, inputs=elements, outputs=[output_label, batch_progress_html],
                               show_progress=True, queue=True)
-    start_batch_button.click(fn=start_batch_process, inputs=elements, outputs=output_label,
+    start_batch_button.click(fn=start_batch_process, inputs=elements, outputs=[output_label, batch_progress_html],
                              show_progress=True, queue=True)
-    stop_batch_button.click(fn=stop_batch_upscale, outputs=output_label, show_progress=True, queue=True)
+    stop_batch_button.click(fn=stop_batch_upscale, outputs=[output_label, batch_progress_html], show_progress=True, queue=True)
     reset_button.click(fn=load_and_reset, inputs=[param_setting_select],
                        outputs=[edm_steps_slider, s_cfg_slider, s_stage2_slider, s_stage1_slider, s_churn_slider,
                                 s_noise_slider, a_prompt_textbox, n_prompt_textbox,
@@ -3102,6 +3393,8 @@ with (block):
         # This targets the compare slider by default
         js="() => toggleSliderFullscreen('compare_slider', 'compare_preview_column', 'compare_fullscreen_button', 'compare_download_button')"
     )
+    
+    # Batch progress now integrated directly into Gradio progress descriptions
 
 if args.port is not None:  # Check if the --port argument is provided
     # Remove direct loading here as it won't work
