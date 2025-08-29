@@ -1,3 +1,5 @@
+
+
 import argparse
 import datetime
 import gc
@@ -2457,6 +2459,42 @@ with open(compare_fullscreen_file) as f:
 head = f"""
 <style media="screen">{css}</style>
 <style media="screen">{slider_css}</style>
+<style media="screen">
+/* Force batch progress display to stay on top of ALL Gradio elements */
+#batch_progress_display {{
+    position: fixed !important;
+    z-index: 2147483647 !important;  /* Maximum possible z-index value */
+    pointer-events: none !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+}}
+
+/* Override any Gradio stacking contexts that might interfere */
+.gradio-container, .gradio-container * {{
+    z-index: auto !important;
+}}
+
+/* Prevent Gradio overlays from affecting our display */
+.gradio-overlay, .gr-overlay, .loading-overlay, .progress-overlay {{
+    z-index: 2147483646 !important;
+}}
+
+/* Prevent any dimming effects on our status display */
+#batch_progress_display * {{
+    opacity: 1 !important;
+    visibility: visible !important;
+    filter: none !important;
+}}
+
+/* Override any global overlay or dimming effects */
+body.gradio-loading #batch_progress_display,
+.gradio-container.loading #batch_progress_display {{
+    opacity: 1 !important;
+    visibility: visible !important;
+}}
+</style>
 <script type="text/javascript">{js}</script>
 <script type="text/javascript">{no_slider}</script>
 <script type="text/javascript">{compare_fullscreen_js}</script>
@@ -2560,7 +2598,18 @@ selected_pos, selected_neg, llava_style_prompt = select_style(
 block = gr.Blocks(title='SUPIR', theme=args.theme, css=css_file, head=head).queue()
 
 with (block):
-    gr.Markdown("SUPIR V83 - https://www.patreon.com/posts/99176057")
+    # START CHANGE: Move the batch progress HTML component to the top level.
+    # This escapes any nested CSS stacking contexts from tabs or columns,
+    # ensuring its high z-index is respected and it appears over Gradio's overlay.
+    batch_progress_html = gr.HTML(
+        value="",
+        visible=False,  # Start hidden. Processing functions will make it visible.
+        show_label=False,
+        elem_id="batch_progress_display"
+    )
+    # END CHANGE
+
+    gr.Markdown("SUPIR V84 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2579,16 +2628,10 @@ with (block):
             with gr.Row():
                 output_label = gr.Label(label="Progress", elem_classes=["progress_label"])
             with gr.Row():
-                # Batch progress display with ultra-high z-index to override Gradio overlay
-                batch_progress_html = gr.HTML(
-                    value="", 
-                    visible=True, 
-                    show_label=False,
-                    elem_id="batch_progress_display",
-                    elem_classes=["batch_progress_priority"]
-                )
-                # Hidden button for JavaScript polling
+                # START CHANGE: The gr.HTML component is now defined at the top level.
+                # We only need the hidden button for polling here.
                 update_batch_progress_button = gr.Button(visible=False, elem_id="update_batch_progress_btn")
+                # END CHANGE
             with gr.Row():
                 target_res_textbox = gr.HTML(value="", visible=True, show_label=False)
         with gr.Row(equal_height=True):
