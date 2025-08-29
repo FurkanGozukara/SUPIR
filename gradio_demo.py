@@ -1192,7 +1192,7 @@ def start_single_process(*element_values):
     status_container.process_params['ckpt_type'] = ckpt_type.value
     
     img_data = []
-    validate_upscale = float(values_dict.get('upscale', 1)) > 1 or values_dict.get('apply_face', False) or values_dict.get('apply_bg', False)
+    validate_upscale = float(values_dict.get('upscale', 1)) > 1 or values_dict.get('apply_face', False) or values_dict.get('apply_bg', False) or values_dict.get('apply_face_only', False)
 
     input_image = values_dict['src_file']
     if input_image is None:
@@ -1239,6 +1239,9 @@ def start_single_process(*element_values):
     values_dict = {k: v for k, v in values_dict.items() if k not in keys_to_pop}
 
     try:
+        # Override skip_existing_images to False for single image processing
+        # Users expect single images to always be processed
+        values_dict['skip_existing_images'] = False
         _, result = batch_process(img_data, **values_dict)
     except Exception as e:
         print(f"An exception occurred: {e} at {traceback.format_exc()}")
@@ -1368,7 +1371,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                   s_stage1, s_stage2, s_cfg, seed, sampler, s_churn, s_noise, color_fix_type, diff_dtype, ae_dtype,
                   linear_cfg, linear_s_stage2, spt_linear_cfg, spt_linear_s_stage2, model_select,
                   ckpt_select, num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
-                  face_prompt, max_megapixels, max_resolution, first_downscale, dont_update_progress=False, unload=True,
+                  face_prompt, max_megapixels, max_resolution, first_downscale, apply_face_only=False, dont_update_progress=False, unload=True,
                   progress=gr.Progress()):
     global model, status_container, event_id
     main_begin_time = time.time()
@@ -1394,6 +1397,8 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
             apply_bg = apply_bg.lower() == 'true'
         if isinstance(apply_face, str):
             apply_face = apply_face.lower() == 'true'
+        if isinstance(apply_face_only, str):
+            apply_face_only = apply_face_only.lower() == 'true'
         if isinstance(linear_cfg, str):
             linear_cfg = linear_cfg.lower() == 'true'
         if isinstance(linear_s_stage2, str):
@@ -1520,17 +1525,22 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
 
         _faces = []
         if not dont_update_progress and progress is not None:
-            progress(counter / total_images, desc=f"Upscaling Images {counter}/{total_images}")
+            progress_value = counter / total_images if total_images > 0 else 1.0
+            progress(progress_value, desc=f"Upscaling Images {counter}/{total_images}")
         face_captions = [img_prompt]
 
-        if apply_face:
+        if apply_face or apply_face_only:
             lq = np.array(img)
             load_face_helper()
             if face_helper is None or not isinstance(face_helper, FaceRestoreHelper):
                 raise ValueError('Face helper not loaded')
             # <<< FIX: Update face_helper's upscale factor >>>
-            printt(f"DEBUG: Setting face_helper upscale_factor to {final_upscale}")
-            face_helper.upscale_factor = final_upscale 
+            if apply_face_only:
+                printt(f"DEBUG: Setting face_helper upscale_factor to 1 for face-only mode")
+                face_helper.upscale_factor = 1
+            else:
+                printt(f"DEBUG: Setting face_helper upscale_factor to {final_upscale}")
+                face_helper.upscale_factor = final_upscale 
             # <<< END FIX >>>
             face_helper.clean_all()
             face_helper.read_image(lq)
@@ -1596,7 +1606,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                               512 - face_resolution // 2:512 + face_resolution // 2]
                 return samples
 
-            if apply_face:
+            if apply_face or apply_face_only:
                 faces = []
                 restored_faces = []
                 for face in face_helper.cropped_faces:
@@ -1657,7 +1667,15 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                     result = _bg[0]
                     printt("DEBUG: Using only restored background. Final image shape: {result.shape if result is not None else 'None'}")
 
-            if not apply_bg and apply_face:                
+            if apply_face_only:
+                printt(f"DEBUG: Applying face-only restoration (no upscaling). Restored faces count: {len(face_helper.restored_faces)}")
+                printt("DEBUG: Using original image resolution (upscale_factor already set to 1).")
+                face_helper.get_inverse_affine(None)
+                printt(f"DEBUG: Pasting {len(face_helper.restored_faces)} faces onto original image. Shape: {face_helper.input_img.shape if hasattr(face_helper, 'input_img') else 'N/A'}")
+                result = face_helper.paste_faces_to_input_image()
+                printt(f"DEBUG: Face-only restoration complete. Final image shape: {result.shape if result is not None else 'None'}")
+                
+            elif not apply_bg and apply_face:                
                 printt(f"DEBUG: Applying only face restoration. Restored faces count: {len(face_helper.restored_faces)}")
                 printt("DEBUG: Getting inverse affine transform before pasting faces onto original sized image.")
                 # <<< FIX: Update face_helper's upscale factor (redundant here if done earlier, but safe) >>>
@@ -1673,7 +1691,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                 result = face_helper.paste_faces_to_input_image()
                 printt(f"DEBUG: Pasting complete (no BG). Final image shape: {result.shape if result is not None else 'None'}")
 
-            if not apply_face and not apply_bg:
+            elif not apply_face and not apply_bg and not apply_face_only:
                 printt("DEBUG: Applying standard SUPIR upscale (no face/BG restoration).")
                 caption = [img_prompt]
                 print("Batchifying sample...")
@@ -1693,7 +1711,8 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                 gen_params_list.append(gen_params)
             desc = f"Image {counter}/{total_images} upscale completed in {image_generation_time:.2f} seconds"
             counter += 1
-            progress(counter / total_images, desc=desc)
+            progress_value = counter / total_images if total_images > 0 else 1.0
+            progress(progress_value, desc=desc)
 
         # Update outputs
         image_data.outputs = results
@@ -1704,7 +1723,8 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
         # Append the image data to the output data after saving
         output_data.append(image_data)
 
-        progress(counter / total_images, desc=f"Image {counter}/{total_images} processed.")
+        progress_value = counter / total_images if total_images > 0 else 1.0
+        progress(progress_value, desc=f"Image {counter}/{total_images} processed.")
         processed_images = counter
         # Check if cancellation was requested
         if not is_processing:
@@ -1719,9 +1739,10 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
     # Now we update the status container
     status_container.image_data = output_data
     if not is_processing or unload:
-        progress(counter / total_images, desc="Unloading SUPIR...")
+        progress_value = counter / total_images if total_images > 0 else 1.0
+        progress(progress_value, desc="Unloading SUPIR...")
         all_to_cpu()
-        progress(counter / total_images, desc="SUPIR Unloaded.")
+        progress(progress_value, desc="SUPIR Unloaded.")
     main_end_time = time.time()
     global unique_counter
     unique_counter = unique_counter + 1
@@ -1729,7 +1750,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
 
 
 def batch_process(img_data,
-                  a_prompt, ae_dtype, apply_bg, apply_face, apply_llava, apply_supir, ckpt_select, color_fix_type,
+                  a_prompt, ae_dtype, apply_bg, apply_face, apply_face_only, apply_llava, apply_supir, ckpt_select, color_fix_type,
                   diff_dtype, edm_steps, face_prompt, face_resolution, first_downscale, linear_CFG, linear_s_stage2,
                   make_comparison_video, model_select, n_prompt, num_images, num_samples, qs, random_seed,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
@@ -1757,6 +1778,8 @@ def batch_process(img_data,
             apply_bg = apply_bg.lower() == 'true'
         if isinstance(apply_face, str):
             apply_face = apply_face.lower() == 'true'
+        if isinstance(apply_face_only, str):
+            apply_face_only = apply_face_only.lower() == 'true'
         if isinstance(random_seed, str):
             random_seed = random_seed.lower() == 'true'
         if isinstance(linear_CFG, str):
@@ -1885,7 +1908,7 @@ def batch_process(img_data,
                                     linear_CFG, linear_s_stage2, spt_linear_CFG, spt_linear_s_stage2, model_select,
                                     ckpt_select,
                                     num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
-                                    face_prompt, max_megapixels, max_resolution, first_downscale, unload=True, progress=progress)
+                                    face_prompt, max_megapixels, max_resolution, first_downscale, apply_face_only, unload=True, progress=progress)
         printt("Processing images (Stage 2) Completed")
     counter += total_supir_steps
     progress(counter / total_steps, desc="Processing completed.")
@@ -2114,6 +2137,23 @@ def auto_enable_bg_restore(face_restore_enabled):
     """
     return gr.update(value=face_restore_enabled)
 
+def handle_face_only_toggle(face_only_enabled):
+    """
+    Handle mutual exclusivity between face-only and combined face+bg restoration.
+    When face-only is enabled, disable face and bg restoration.
+    """
+    if face_only_enabled:
+        return gr.update(value=False), gr.update(value=False)
+    return gr.update(), gr.update()
+
+def handle_face_restoration_toggle(face_enabled, face_only_enabled):
+    """
+    Handle face restoration toggle - disable face-only when face+bg is enabled.
+    """
+    if face_enabled and face_only_enabled:
+        return gr.update(value=False)
+    return gr.update()
+
 
 title_md = """
 # **SUPIR: Practicing Model Scaling for Photo-Realistic Image Restoration**
@@ -2244,7 +2284,7 @@ selected_pos, selected_neg, llava_style_prompt = select_style(
 block = gr.Blocks(title='SUPIR', theme=args.theme, css=css_file, head=head).queue()
 
 with (block):
-    gr.Markdown("SUPIR V81 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V82 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2457,9 +2497,10 @@ with (block):
                                                        step=32)
                     with gr.Row():
                         with gr.Column():
-                            apply_bg_checkbox = gr.Checkbox(label="BG restoration", value=False, visible=False)
-                        with gr.Column():
                             apply_face_checkbox = gr.Checkbox(label="Face restoration", value=False)
+                        with gr.Column():
+                            apply_face_only_checkbox = gr.Checkbox(label="Only Face Restoration", value=False)
+                    apply_bg_checkbox = gr.Checkbox(label="BG restoration", value=False, visible=False)
 
 
                 with gr.Accordion("Presets", open=True):
@@ -2780,6 +2821,7 @@ with (block):
         "ae_dtype": ae_dtype_radio,
         "apply_bg": apply_bg_checkbox,
         "apply_face": apply_face_checkbox,
+        "apply_face_only": apply_face_only_checkbox,
         "apply_llava": apply_llava_checkbox,
         "apply_supir": apply_supir_checkbox,
         "auto_unload_llava": auto_unload_llava_checkbox,
@@ -2870,6 +2912,10 @@ with (block):
     
     # Auto-enable background restore when face restore is enabled
     apply_face_checkbox.change(fn=auto_enable_bg_restore, inputs=[apply_face_checkbox], outputs=[apply_bg_checkbox])
+    
+    # Handle mutual exclusivity between face restoration modes
+    apply_face_only_checkbox.change(fn=handle_face_only_toggle, inputs=[apply_face_only_checkbox], outputs=[apply_face_checkbox, apply_bg_checkbox])
+    apply_face_checkbox.change(fn=handle_face_restoration_toggle, inputs=[apply_face_checkbox, apply_face_only_checkbox], outputs=[apply_face_only_checkbox])
     
     submit_button.click(fn=submit_feedback, inputs=[event_id, fb_score, fb_text], outputs=[fb_text])
     upscale_slider.change(fn=update_target_resolution, inputs=[src_image_display, upscale_slider, max_mp_slider, max_res_slider],
