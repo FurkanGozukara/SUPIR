@@ -1733,7 +1733,7 @@ def batch_process(img_data,
                   diff_dtype, edm_steps, face_prompt, face_resolution, first_downscale, linear_CFG, linear_s_stage2,
                   make_comparison_video, model_select, n_prompt, num_images, num_samples, qs, random_seed,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
-                  spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, progress=gr.Progress()
+                  spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, skip_existing_images, progress=gr.Progress()
                   ):
     global is_processing, llava_agent, model, status_container
     
@@ -1771,6 +1771,8 @@ def batch_process(img_data,
             auto_unload_llava = auto_unload_llava.lower() == 'true'
         if isinstance(first_downscale, str):
             first_downscale = first_downscale.lower() == 'true'
+        if isinstance(skip_existing_images, str):
+            skip_existing_images = skip_existing_images.lower() == 'true'
     except (ValueError, TypeError) as e:
         print(f"Error converting parameters in batch_process: {e}")
         # Continue with original values if conversion fails
@@ -1829,6 +1831,39 @@ def batch_process(img_data,
 
         # Update the img_data from the captioner
         img_data = status_container.image_data
+    
+    # Filter out images that already exist in target folder if skip option is enabled
+    if skip_existing_images and apply_supir:
+        output_dir = params.get('outputs_folder', args.outputs_folder)
+        filtered_img_data = []
+        skipped_count = 0
+        
+        for image_data in img_data:
+            image_path = image_data.media_path
+            base_filename = os.path.splitext(os.path.basename(image_path))[0]
+            if len(base_filename) > 250:
+                base_filename = base_filename[:250]
+            
+            target_path = os.path.join(output_dir, f'{base_filename}.png')
+            
+            # Check if the target file already exists
+            if os.path.exists(target_path):
+                printt(f"Skipping {base_filename}.png - already exists in target folder")
+                skipped_count += 1
+            else:
+                filtered_img_data.append(image_data)
+        
+        img_data = filtered_img_data
+        status_container.image_data = img_data
+        
+        # Recalculate totals after filtering
+        total_images = len(img_data)
+        total_supir_steps = total_images * num_images + 2 if apply_supir else 0
+        total_steps = total_supir_steps + total_llava_steps + 1
+        
+        if skipped_count > 0:
+            printt(f"Skipped {skipped_count} already processed images. Processing {total_images} remaining images.")
+    
     # Check for cancellation
     if not is_processing and model is not None:
         progress(total_steps / total_steps, desc="Cancelling SUPIR...")
@@ -2209,7 +2244,7 @@ selected_pos, selected_neg, llava_style_prompt = select_style(
 block = gr.Blocks(title='SUPIR', theme=args.theme, css=css_file, head=head).queue()
 
 with (block):
-    gr.Markdown("SUPIR V80 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V81 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2350,8 +2385,10 @@ with (block):
                             outputs_folder_textbox = gr.Textbox(
                                 label="Batch Output Path - Leave empty to save to default.",
                                 placeholder="R:\SUPIR video\comparison_images\outputs")
-                            save_captions_checkbox = gr.Checkbox(label="Save Captions",
-                                                                 value=True)
+                            with gr.Row():
+                                save_captions_checkbox = gr.Checkbox(label="Save Captions",
+                                                                     value=True)
+                                skip_existing_images_checkbox = gr.Checkbox(label="Skip already upscaled images in target folder", value=True) # Default to True to avoid re-processing
 
                 with gr.Accordion("SUPIR options", open=False):
                     with gr.Row():
@@ -2525,6 +2562,9 @@ with (block):
                         for e_key, element_index in zip(elements_dict.keys(), range(len(ui_elements))):
                             element = ui_elements[element_index]
                             last_index = element_index 
+                            # Check if element should be excluded from config saving
+                            if getattr(element, 'do_not_save_to_config', False):
+                                continue
                             # Check if the element has a 'value' attribute, otherwise use it directly
                             if hasattr(element, 'value'):
                                 serialized_dict[e_key] = element.value
@@ -2537,6 +2577,9 @@ with (block):
                             # Check if the extra element has a 'value' attribute, otherwise use directly
                             element = ui_elements[last_index]
                             last_index=last_index+1
+                            # Check if element should be excluded from config saving
+                            if getattr(element, 'do_not_save_to_config', False):
+                                continue
                             if hasattr(element, 'value'):
                                 serialized_dict[extra_key] = element.value
                             else:
@@ -2774,6 +2817,7 @@ with (block):
         "spt_linear_CFG": spt_linear_cfg_slider,
         "spt_linear_s_stage2": spt_linear_s_stage2_slider,
         "skip_llava_if_txt_exists": skip_llava_if_txt_exists_checkbox, # Added new checkbox
+        "skip_existing_images": skip_existing_images_checkbox, # Added skip existing images checkbox
         "src_file": src_input_file,
         "temperature": temperature_slider,
         "top_p": top_p_slider,
