@@ -524,17 +524,48 @@ status_container = StatusContainer()
 elements_dict = {}
 extra_info_elements = {}
 
+# Force initialization of processing state
 single_process = False
 is_processing = False
 last_used_checkpoint = None
 
-# Batch progress tracking variables
+# Initialize batch processing variables to ensure clean state
 batch_start_time = None
-batch_processed_count = 0
 batch_total_count = 0
+batch_processed_count = 0
 batch_processing_times = []
 batch_current_stage = ""
 
+print(f"App startup: is_processing = {is_processing}")
+
+
+def get_progress_display_html(title, content):
+    """Generate HTML structure for progress display"""
+    return f"""
+    <div style="
+        position: fixed !important;
+        top: 20px !important;
+        left: 20px !important;
+        width: 45vw !important;
+        max-width: 600px !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
+        color: white !important; 
+        padding: 8px 12px !important; 
+        border-radius: 12px !important; 
+        font-family: 'Segoe UI', Arial, sans-serif !important; 
+        box-shadow: 0 8px 32px rgba(0,0,0,0.8) !important;
+        border: 3px solid #4299e1 !important;
+        z-index: 9999999 !important;
+        pointer-events: none !important;
+    ">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h2 style="margin: 0; font-size: 16px; font-weight: 700; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
+                {title}
+            </h2>
+        </div>
+        {content}
+    </div>
+    """
 
 def get_batch_progress_html():
     """Generate HTML for persistent batch progress display"""
@@ -570,61 +601,47 @@ def get_batch_progress_html():
     # Progress percentage
     progress_percent = (batch_processed_count / batch_total_count * 100) if batch_total_count > 0 else 0
     
-    html = f"""
-    <div style="
-        position: fixed !important;
-        top: 120px !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        width: 90vw !important;
-        max-width: 1200px !important;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
-        color: white !important; 
-        padding: 16px !important; 
-        border-radius: 12px !important; 
-        font-family: 'Segoe UI', Arial, sans-serif !important; 
-        box-shadow: 0 8px 32px rgba(0,0,0,0.8) !important;
-        border: 3px solid #4299e1 !important;
-        z-index: 9999999 !important;
-        pointer-events: none !important;
-    ">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
-                🚀 BATCH PROCESSING
-            </h2>
-            <div style="background: rgba(255,255,255,0.25); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; backdrop-filter: blur(10px);">
-                {batch_processed_count}/{batch_total_count} ({progress_percent:.1f}%)
-            </div>
+    # Build progress content
+    progress_counter = f"""
+        <div style="background: rgba(255,255,255,0.25); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; backdrop-filter: blur(10px);">
+            {batch_processed_count}/{batch_total_count} ({progress_percent:.1f}%)
+        </div>
+    """
+    
+    progress_content = f"""
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+            {progress_counter}
         </div>
         
-        <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 10px; margin-bottom: 12px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
+        <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 10px; margin-bottom: 8px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
             <div style="background: linear-gradient(90deg, #4CAF50, #8BC34A, #CDDC39); height: 100%; width: {progress_percent}%; border-radius: 10px; transition: width 0.5s ease; box-shadow: 0 2px 8px rgba(76,175,80,0.4);"></div>
         </div>
         
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px;">
-            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
-                <div style="font-size: 16px; font-weight: bold; color: #4CAF50;">⏱️ {avg_time:.1f}s</div>
-                <div style="font-size: 10px; opacity: 0.9;">Avg per Image</div>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px;">
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 6px; border-radius: 6px; backdrop-filter: blur(5px);">
+                <div style="font-size: 14px; font-weight: bold; color: #4CAF50;">⏱️ {avg_time:.1f}s</div>
+                <div style="font-size: 9px; opacity: 0.9;">Avg per Image</div>
             </div>
-            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
-                <div style="font-size: 16px; font-weight: bold; color: #FF9800;">🔄 {remaining}</div>
-                <div style="font-size: 10px; opacity: 0.9;">Remaining</div>
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 6px; border-radius: 6px; backdrop-filter: blur(5px);">
+                <div style="font-size: 14px; font-weight: bold; color: #FF9800;">🔄 {remaining}</div>
+                <div style="font-size: 9px; opacity: 0.9;">Remaining</div>
             </div>
-            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
-                <div style="font-size: 16px; font-weight: bold; color: #E91E63;">⏰ {eta_text}</div>
-                <div style="font-size: 10px; opacity: 0.9;">ETA</div>
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 6px; border-radius: 6px; backdrop-filter: blur(5px);">
+                <div style="font-size: 14px; font-weight: bold; color: #E91E63;">⏰ {eta_text}</div>
+                <div style="font-size: 9px; opacity: 0.9;">ETA</div>
             </div>
-            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 8px; border-radius: 8px; backdrop-filter: blur(5px);">
-                <div style="font-size: 16px; font-weight: bold; color: #2196F3;">📊 {elapsed}</div>
-                <div style="font-size: 10px; opacity: 0.9;">Elapsed</div>
+            <div style="text-align: center; background: rgba(255,255,255,0.1); padding: 6px; border-radius: 6px; backdrop-filter: blur(5px);">
+                <div style="font-size: 14px; font-weight: bold; color: #2196F3;">📊 {elapsed}</div>
+                <div style="font-size: 9px; opacity: 0.9;">Elapsed</div>
             </div>
         </div>
         
-        <div style="text-align: center; font-size: 12px; color: rgba(255,255,255,0.8); font-style: italic; background: rgba(0,0,0,0.2); padding: 6px; border-radius: 6px;">
+        <div style="text-align: center; font-size: 10px; color: rgba(255,255,255,0.8); font-style: italic; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 4px;">
             {batch_current_stage}
         </div>
-    </div>
     """
+    
+    html = get_progress_display_html("🚀 BATCH PROCESSING", progress_content)
     
     return html
 
@@ -640,45 +657,38 @@ def hide_batch_progress():
     """Function to hide batch progress display"""
     return gr.update(visible=False, value="")
 
+def show_single_progress():
+    """Function to show single image processing status"""
+    if is_processing:
+        single_content = """
+            <div style="text-align: center; font-size: 12px; color: rgba(255,255,255,0.9); font-style: italic; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px;">
+                🖼️ Processing single image...
+            </div>
+        """
+        html = get_progress_display_html("⚡ SINGLE PROCESSING", single_content)
+        return gr.update(visible=True, value=html)
+    else:
+        return gr.update(visible=False, value="")
+
 def start_batch_with_progress(*element_values):
     """Start batch processing and show progress display"""
     # Show initial batch progress
-    initial_html = """
-    <div style="
-        position: fixed !important;
-        top: 120px !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-        width: 90vw !important;
-        max-width: 1200px !important;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
-        color: white !important; 
-        padding: 16px !important; 
-        border-radius: 12px !important; 
-        font-family: 'Segoe UI', Arial, sans-serif !important; 
-        box-shadow: 0 8px 32px rgba(0,0,0,0.8) !important;
-        border: 3px solid #4299e1 !important;
-        z-index: 9999999 !important;
-        pointer-events: none !important;
-    ">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h2 style="margin: 0; font-size: 20px; font-weight: 700; color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,0.3);">
-                🚀 BATCH STARTING...
-            </h2>
+    initial_content = """
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
             <div style="background: rgba(255,255,255,0.25); color: white; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: bold; backdrop-filter: blur(10px);">
                 0%
             </div>
         </div>
         
-        <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 10px; margin-bottom: 12px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
+        <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 10px; margin-bottom: 8px; overflow: hidden; box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);">
             <div style="background: linear-gradient(90deg, #4CAF50, #8BC34A, #CDDC39); height: 100%; width: 0%; border-radius: 10px; transition: width 0.5s ease; box-shadow: 0 2px 8px rgba(76,175,80,0.4);"></div>
         </div>
         
-        <div style="text-align: center; font-size: 14px; color: rgba(255,255,255,0.9); font-style: italic; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px;">
+        <div style="text-align: center; font-size: 12px; color: rgba(255,255,255,0.9); font-style: italic; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px;">
             🔄 Initializing batch processing...
         </div>
-    </div>
     """
+    initial_html = get_progress_display_html("🚀 BATCH STARTING...", initial_content)
     
     # Start the actual batch processing
     result = start_batch_process(*element_values)
@@ -1347,14 +1357,14 @@ def populate_gallery():
 
 
 def start_single_process(*element_values):
-    global status_container, is_processing, batch_total_count, batch_processed_count, batch_processing_times
-    # Ensure we start with a clean processing state
+    global status_container, is_processing, batch_total_count, batch_processed_count, batch_processing_times, batch_current_stage
+    # Force reset processing state to handle any stuck flags
     is_processing = False
-    status_container = StatusContainer()
-    # Clear any leftover batch tracking variables to ensure progress display is hidden
     batch_total_count = 0
     batch_processed_count = 0
     batch_processing_times = []
+    batch_current_stage = ""
+    status_container = StatusContainer()
     values_dict = zip(elements_dict.keys(), element_values)
     values_dict = dict(values_dict)
     
@@ -1410,13 +1420,20 @@ def start_single_process(*element_values):
     values_dict = {k: v for k, v in values_dict.items() if k not in keys_to_pop}
 
     try:
+        is_processing = True
+        # Show single processing status
+        single_progress_display = show_single_progress()
+        
         # Override skip_existing_images to False for single image processing
         # Users expect single images to always be processed
         values_dict['skip_existing_images'] = False
         _, result = batch_process(img_data, **values_dict)
+        
+        is_processing = False
     except Exception as e:
         print(f"An exception occurred: {e} at {traceback.format_exc()}")
         is_processing = False
+    
     # Return result and hidden batch progress display for single processing  
     batch_progress_display = hide_batch_progress()
     return result, batch_progress_display
@@ -1424,8 +1441,12 @@ def start_single_process(*element_values):
 
 def start_batch_process(*element_values):
     global status_container, is_processing, batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage
-    # Ensure we start with a clean processing state
+    # Force reset processing state to handle any stuck flags
     is_processing = False
+    batch_total_count = 0
+    batch_processed_count = 0
+    batch_processing_times = []
+    batch_current_stage = ""
     status_container = StatusContainer()
     
     # Initialize batch progress tracking
@@ -1994,7 +2015,14 @@ def batch_process(img_data,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
                   spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, skip_existing_images, progress=gr.Progress()
                   ):
-    global is_processing, llava_agent, model, status_container
+    global is_processing, llava_agent, model, status_container, batch_total_count, batch_start_time, batch_processed_count, batch_processing_times, batch_current_stage
+    print(f"batch_process called: is_processing = {is_processing}")
+    
+    # Safety check: if is_processing is True but we're being called from a fresh start,
+    # it might be stuck from a previous crash - reset it
+    if is_processing and batch_total_count == 0:
+        print("Detected stuck is_processing flag - resetting")
+        is_processing = False
     
     # Ensure key parameters are of the correct type before processing
     try:
@@ -2063,7 +2091,6 @@ def batch_process(img_data,
     is_processing = True
     
     # Initialize batch progress tracking
-    global batch_start_time, batch_processed_count, batch_total_count, batch_current_stage
     batch_start_time = time.time()
     batch_processed_count = 0
     batch_total_count = len(img_data)
@@ -2321,6 +2348,19 @@ def stop_batch_upscale(progress=gr.Progress()):
     # Hide batch progress when stopping
     batch_progress_display = hide_batch_progress()
     return "Processing cancelled. Please wait for current operations to stop...", batch_progress_display
+
+def reset_processing_state():
+    """Reset processing state in case it gets stuck"""
+    global is_processing, batch_total_count, batch_processed_count, batch_processing_times, batch_current_stage, batch_start_time
+    is_processing = False
+    batch_total_count = 0
+    batch_processed_count = 0
+    batch_processing_times = []
+    batch_current_stage = ""
+    batch_start_time = None
+    print("Processing state has been reset.")
+    batch_progress_display = hide_batch_progress()
+    return "Processing state reset successfully.", batch_progress_display
 
 
 def load_and_reset(param_setting):
@@ -2609,7 +2649,7 @@ with (block):
     )
     # END CHANGE
 
-    gr.Markdown("SUPIR V84 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V85 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2621,6 +2661,7 @@ with (block):
                 start_single_button = gr.Button(value="Process Single")
                 start_batch_button = gr.Button(value="Process Batch")
                 stop_batch_button = gr.Button(value="Cancel")
+                reset_state_button = gr.Button(value="Reset State", variant="secondary")
                 btn_open_outputs = gr.Button("Open Outputs Folder")
                 btn_open_outputs.click(fn=open_folder)
 
@@ -3225,6 +3266,7 @@ with (block):
     start_batch_button.click(fn=start_batch_process, inputs=elements, outputs=[output_label, batch_progress_html],
                              show_progress=True, queue=True)
     stop_batch_button.click(fn=stop_batch_upscale, outputs=[output_label, batch_progress_html], show_progress=True, queue=True)
+    reset_state_button.click(fn=reset_processing_state, outputs=[output_label, batch_progress_html], show_progress=False, queue=False)
     reset_button.click(fn=load_and_reset, inputs=[param_setting_select],
                        outputs=[edm_steps_slider, s_cfg_slider, s_stage2_slider, s_stage1_slider, s_churn_slider,
                                 s_noise_slider, a_prompt_textbox, n_prompt_textbox,
