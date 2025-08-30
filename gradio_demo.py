@@ -536,6 +536,7 @@ batch_processed_count = 0
 batch_processing_times = []
 batch_current_stage = ""
 
+
 print(f"App startup: is_processing = {is_processing}")
 
 
@@ -656,6 +657,11 @@ def show_batch_progress():
 def hide_batch_progress():
     """Function to hide batch progress display"""
     return gr.update(visible=False, value="")
+
+def clear_output_message():
+    """Simple function to clear any previous output message"""
+    return "", hide_batch_progress()
+
 
 def show_single_progress():
     """Function to show single image processing status"""
@@ -1358,6 +1364,7 @@ def populate_gallery():
 
 def start_single_process(*element_values):
     global status_container, is_processing, batch_total_count, batch_processed_count, batch_processing_times, batch_current_stage
+    
     # Force reset processing state to handle any stuck flags
     is_processing = False
     batch_total_count = 0
@@ -1377,7 +1384,10 @@ def start_single_process(*element_values):
 
     input_image = values_dict['src_file']
     if input_image is None:
-        return "No input image provided."
+        return "No input image provided.", hide_batch_progress()
+    
+    # Clear any previous completion message by immediately showing processing status
+    # This is a workaround since Gradio doesn't allow immediate UI updates during processing
 
     image_files = [input_image]
 
@@ -1424,6 +1434,11 @@ def start_single_process(*element_values):
         # Show single processing status
         single_progress_display = show_single_progress()
         
+        # IMPORTANT: Return immediately with a starting message to clear previous completion messages
+        # This creates immediate UI feedback when the button is clicked
+        starting_result = "Processing started..."
+        # Note: This will be overridden by the actual result when batch_process completes
+        
         # Override skip_existing_images to False for single image processing
         # Users expect single images to always be processed
         values_dict['skip_existing_images'] = False
@@ -1439,8 +1454,10 @@ def start_single_process(*element_values):
     return result, batch_progress_display
 
 
+
 def start_batch_process(*element_values):
     global status_container, is_processing, batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage
+    
     # Force reset processing state to handle any stuck flags
     is_processing = False
     batch_total_count = 0
@@ -1464,9 +1481,9 @@ def start_batch_process(*element_values):
     
     batch_folder = values_dict.get('batch_process_folder')
     if not batch_folder:
-        return "No input folder provided."
+        return "No input folder provided.", hide_batch_progress()
     if not os.path.exists(batch_folder):
-        return "The input folder does not exist."
+        return "The input folder does not exist.", hide_batch_progress()
 
     if len(values_dict['outputs_folder']) < 2:
         values_dict['outputs_folder'] = args.outputs_folder
@@ -1504,9 +1521,11 @@ def start_batch_process(*element_values):
     except Exception as e:
         print(f"An exception occurred: {e} at {traceback.format_exc()}")
         is_processing = False
+    
     # Return both result status and batch progress display
     batch_progress_display = show_batch_progress()
     return result, batch_progress_display
+
 
 
 def llava_process(inputs: List[MediaData], temp, p, question=None, save_captions=False, progress=gr.Progress(), skip_llava_if_txt_exists: bool = True):
@@ -2115,7 +2134,8 @@ def batch_process(img_data,
     # if status_container.is_video:
     #   apply_llava = False
     batch_info = f" 🚀 BATCH: {batch_total_count} images queued for processing" if batch_total_count > 0 else ""
-    progress(0, desc=f"Processing {total_images} images...{batch_info}")
+    # Clear any previous completion message by showing current processing status
+    progress(0, desc=f"Starting - Processing {total_images} images...{batch_info}")
     printt(f"Processing {total_images} images...", reset=True)
     if apply_llava:
         batch_current_stage = "Processing LLaVA (image captioning)..."
@@ -2156,6 +2176,8 @@ def batch_process(img_data,
         
         # Recalculate totals after filtering
         total_images = len(img_data)
+        # Update batch_total_count to reflect the actual number of images to be processed
+        batch_total_count = total_images
         total_supir_steps = total_images * num_images + 2 if apply_supir else 0
         total_steps = total_supir_steps + total_llava_steps + 1
         
@@ -2589,6 +2611,7 @@ function startBatchProgressPolling() {{
     }}, 2000); // Poll every 2 seconds
 }}
 
+
 // Start polling when page loads
 document.addEventListener('DOMContentLoaded', function() {{
     startBatchProgressPolling();
@@ -2647,9 +2670,10 @@ with (block):
         show_label=False,
         elem_id="batch_progress_display"
     )
+    
     # END CHANGE
 
-    gr.Markdown("SUPIR V85 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V86 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2912,7 +2936,8 @@ with (block):
 
                         # Create default updates (no change) for all elements
                         all_updates = []
-                        all_updates.append(gr.update(value=f"Loaded preset: {preset_name}"))  # First update is the output message
+                        # Clear the message after a short delay instead of keeping it permanent
+                        all_updates.append(gr.update(value=""))  # First update is the output message
                         
                         # Add updates for elements_dict
                         for _ in elements_dict:
@@ -3260,11 +3285,18 @@ with (block):
     # Batch progress update handler (triggered by JavaScript)
     update_batch_progress_button.click(fn=show_batch_progress, outputs=batch_progress_html, 
                                       show_progress=False, queue=False)
+    
 
-    start_single_button.click(fn=start_single_process, inputs=elements, outputs=[output_label, batch_progress_html],
-                              show_progress=True, queue=True)
-    start_batch_button.click(fn=start_batch_process, inputs=elements, outputs=[output_label, batch_progress_html],
-                             show_progress=True, queue=True)
+    # Clear previous messages first, then start processing
+    start_single_button.click(fn=clear_output_message, outputs=[output_label, batch_progress_html],
+                              show_progress=False, queue=True).then(
+        fn=start_single_process, inputs=elements, outputs=[output_label, batch_progress_html],
+        show_progress=True, queue=True)
+    
+    start_batch_button.click(fn=clear_output_message, outputs=[output_label, batch_progress_html],
+                             show_progress=False, queue=True).then(
+        fn=start_batch_process, inputs=elements, outputs=[output_label, batch_progress_html],
+        show_progress=True, queue=True)
     stop_batch_button.click(fn=stop_batch_upscale, outputs=[output_label, batch_progress_html], show_progress=True, queue=True)
     reset_state_button.click(fn=reset_processing_state, outputs=[output_label, batch_progress_html], show_progress=False, queue=False)
     reset_button.click(fn=load_and_reset, inputs=[param_setting_select],
