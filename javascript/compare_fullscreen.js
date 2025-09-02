@@ -496,6 +496,22 @@ function toggleSliderFullscreen(sliderId, previewColumnId, fullscreenButtonId, d
         if (fullscreenBtn) fullscreenBtn.classList.remove('full');
         if (downloadBtn) downloadBtn.classList.remove('full');
         document.body.style.overflow = 'auto';
+        
+        // Restore settings panels and other interface elements
+        const settingsPanel = document.getElementById('component-37');
+        if (settingsPanel) {
+            settingsPanel.style.display = '';
+        }
+        
+        // Restore all hidden sibling elements
+        const previewParent = previewCol.parentElement;
+        if (previewParent) {
+            const hiddenElements = previewParent.querySelectorAll('[data-hidden-by-fullscreen="true"]');
+            hiddenElements.forEach(element => {
+                element.style.display = '';
+                element.removeAttribute('data-hidden-by-fullscreen');
+            });
+        }
         sliderElem.style.zIndex = "";
         // Restore original height - use specific ID if needed
         // TODO: Find a better way to manage original height? Maybe CSS classes?
@@ -503,6 +519,10 @@ function toggleSliderFullscreen(sliderId, previewColumnId, fullscreenButtonId, d
             sliderElem.style.height = "500px"; // Or read from attribute if set
         } else if (sliderId === 'gallery1') {
             sliderElem.style.height = "400px"; // Or read from attribute
+            // Clear any important styles set during fullscreen
+            sliderElem.style.removeProperty('width');
+            sliderElem.style.removeProperty('max-width');
+            sliderElem.style.removeProperty('max-height');
         } else {
             sliderElem.style.height = ""; // Default fallback
         }
@@ -538,8 +558,28 @@ function toggleSliderFullscreen(sliderId, previewColumnId, fullscreenButtonId, d
         if (fullscreenBtn) fullscreenBtn.classList.add('full');
         if (downloadBtn) downloadBtn.classList.add('full');
         document.body.style.overflow = 'hidden';
+        
+        // Hide settings panels and other interface elements
+        const settingsPanel = document.getElementById('component-37');
+        if (settingsPanel) {
+            settingsPanel.style.display = 'none';
+        }
+        
+        // Hide all sibling elements after the preview column
+        const previewParent = previewCol.parentElement;
+        if (previewParent) {
+            let nextSibling = previewCol.nextElementSibling;
+            while (nextSibling) {
+                nextSibling.style.display = 'none';
+                nextSibling.setAttribute('data-hidden-by-fullscreen', 'true');
+                nextSibling = nextSibling.nextElementSibling;
+            }
+        }
         sliderElem.style.zIndex = "1000";
-        sliderElem.style.height = "90vh"; // Consistent fullscreen height
+        sliderElem.style.height = "calc(100vh - 80px)"; // Consistent fullscreen height with padding
+        sliderElem.style.maxHeight = "calc(100vh - 80px)"; // Ensure max-height is also set
+        sliderElem.style.width = "calc(100vw - 80px)"; // Ensure full width
+        sliderElem.style.maxWidth = "calc(100vw - 80px)"; // Ensure max-width is also set
 
         // Apply pixelated rendering if needed (specific to compare tab?)
         if (sliderId === 'compare_slider') { // Example: only for compare slider
@@ -568,6 +608,13 @@ function toggleSliderFullscreen(sliderId, previewColumnId, fullscreenButtonId, d
         // Delay layout fixes/re-init
         setTimeout(() => {
             window.dispatchEvent(new Event('resize'));
+            
+            // Force correct dimensions regardless of inline styles
+            sliderElem.style.setProperty('height', 'calc(100vh - 80px)', 'important');
+            sliderElem.style.setProperty('max-height', 'calc(100vh - 80px)', 'important');
+            sliderElem.style.setProperty('width', 'calc(100vw - 80px)', 'important');
+            sliderElem.style.setProperty('max-width', 'calc(100vw - 80px)', 'important');
+            
             if (sliderElem.noUiSlider) {
                 sliderElem.noUiSlider.updateOptions({}, false); // Redraw slider first
             }

@@ -107,22 +107,26 @@
 }
 
 .full_preview {
-    width: 100%;
-    height: 100%;
+    width: 100vw;
+    height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
     position: fixed;
     left: 0;
     top: 0;
-    z-index: 50;
+    z-index: 1000;
     overflow: hidden;
-    background-color: rgba(0,0,0,0.9);
+    background-color: rgba(0,0,0,0.95);
+    box-sizing: border-box;
 }
 
 .slider_button.full {
     position: fixed !important;
-    z-index: 100;
+    z-index: 1100;
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    border: 2px solid rgba(0, 0, 0, 0.5);
+    color: #000 !important;
 }
 
 .slider_button {
@@ -151,17 +155,18 @@
 }
 
 .preview_col.full_preview .active {
-    height: 100% !important;
+    height: 100vh !important;
     left: 0;
     top: 0;
-    width: 100%;
+    width: 100vw !important;
     display: flex;
     justify-content: center;
     align-items: center;
     position: fixed;
-
     overflow: hidden;
-    z-index: 100;
+    z-index: 1000;
+    padding: 40px;
+    box-sizing: border-box;
 }
 
 .preview_col.full_preview .preview_box:not(.active) {
@@ -348,18 +353,21 @@
     width: 100vw !important;
     height: 100vh !important;
     z-index: 1000;
-    background-color: rgba(0,0,0,0.9);
+    background-color: rgba(0,0,0,0.95);
     display: flex;
     justify-content: center;
     align-items: center;
-    padding: 0;
+    padding: 40px;
     margin: 0;
     overflow: hidden;
+    box-sizing: border-box;
 }
 
 #compare_preview_column.full_preview #compare_slider {
-    width: 100vw !important;
-    height: 100vh !important;
+    width: calc(100vw - 80px) !important;
+    height: calc(100vh - 80px) !important;
+    max-width: 95vw !important;
+    max-height: 95vh !important;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -384,6 +392,119 @@
     align-items: center;
     margin: 0;
     padding: 0;
+}
+
+/* Ensure buttons stay visible in fullscreen */
+.full_preview .slider_button.full,
+#fullscreen_button.full,
+#download_button.full,
+#compare_fullscreen_button.full,
+#compare_download_button.full {
+    position: fixed !important;
+    z-index: 1100 !important;
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    border: 2px solid rgba(0, 0, 0, 0.3) !important;
+    color: #000 !important;
+    border-radius: 50% !important;
+    width: 40px !important;
+    height: 40px !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    font-size: 20px !important;
+    cursor: pointer !important;
+    user-select: none !important;
+}
+
+/* Fix specific button positions in fullscreen */
+#fullscreen_button.full {
+    top: 20px !important;
+    right: 20px !important;
+}
+
+#download_button.full {
+    top: 20px !important;
+    right: 80px !important;
+}
+
+#compare_fullscreen_button.full {
+    top: 20px !important;
+    right: 20px !important;
+}
+
+#compare_download_button.full {
+    top: 20px !important;
+    right: 80px !important;
+}
+
+/* Prevent content from overflowing in fullscreen */
+.full_preview * {
+    box-sizing: border-box;
+}
+
+/* Ensure the slider content is properly sized */
+.full_preview .noUi-target {
+    max-width: 95vw !important;
+    max-height: 95vh !important;
+}
+
+/* Fix the negative calc height in fullscreen mode */
+.preview_col.full_preview #gallery1 {
+    height: calc(100vh - 80px) !important;
+    max-height: calc(100vh - 80px) !important;
+}
+
+/* Ensure gallery1 takes proper fullscreen dimensions */
+#preview_column.full_preview #gallery1 {
+    height: calc(100vh - 80px) !important;
+    max-height: calc(100vh - 80px) !important;
+    width: calc(100vw - 80px) !important;
+    max-width: calc(100vw - 80px) !important;
+}
+
+/* Override any problematic inline styles in fullscreen */
+.full_preview #gallery1[style*="calc(-"] {
+    height: calc(100vh - 80px) !important;
+    max-height: calc(100vh - 80px) !important;
+    width: calc(100vw - 80px) !important;
+    max-width: calc(100vw - 80px) !important;
+}
+
+/* Force override any negative calc values */
+#gallery1[style*="calc(-40px + 100vh)"] {
+    height: calc(100vh - 80px) !important;
+    max-height: calc(100vh - 80px) !important;
+}
+
+#gallery1[style*="calc(-40px + 100vw)"] {
+    width: calc(100vw - 80px) !important;
+    max-width: calc(100vw - 80px) !important;
+}
+
+/* Hide settings panels and other interface elements in fullscreen mode */
+body:has(.full_preview) #component-37,
+body:has(#preview_column.full_preview) #component-37 {
+    display: none !important;
+}
+
+/* Hide settings panels with more specific selectors */
+.full_preview ~ div[id^="component-"] {
+    display: none !important;
+}
+
+/* Alternative approach - hide elements that come after fullscreen preview */
+#preview_column.full_preview + * {
+    display: none !important;
+}
+
+/* Ensure fullscreen preview takes precedence over other content */
+.full_preview {
+    z-index: 1000 !important;
+}
+
+/* Hide the entire row containing settings when fullscreen is active */
+body:has(.full_preview) .svelte-15lo0d8:has(#component-37) {
+    display: none !important;
 }
 
 
