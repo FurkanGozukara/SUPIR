@@ -2673,7 +2673,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V87 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V91 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
