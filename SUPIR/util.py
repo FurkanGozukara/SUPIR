@@ -3,8 +3,11 @@ import os
 import cv2
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
 from omegaconf import OmegaConf
+
+# Enable loading of truncated images automatically
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from torch.nn.functional import interpolate
 
 from SUPIR.utils import models_utils

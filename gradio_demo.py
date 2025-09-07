@@ -19,11 +19,14 @@ import gradio as gr
 import numpy as np
 import requests
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
 from PIL import PngImagePlugin
 from gradio_imageslider import ImageSlider
 import pillow_avif  # Import the AVIF plugin
 from PIL import UnidentifiedImageError
+
+# Enable loading of truncated images automatically
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 import ui_helpers
 from SUPIR.models.SUPIR_model import SUPIRModel
@@ -2673,7 +2676,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V93 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V94 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
