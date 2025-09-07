@@ -232,6 +232,22 @@
     background: var(--button-secondary-background);
 }
 
+/* Ensure button containers have relative positioning for info buttons */
+button.info-button, 
+#component-6, 
+#component-7 {
+    position: relative !important;
+    z-index: 1 !important;
+    overflow: visible !important;
+}
+
+/* Ensure parent containers don't clip the info buttons */
+#component-5, 
+.svelte-15lo0d8,
+.svelte-cmf5ev {
+    overflow: visible !important;
+}
+
 .info-btn {
     position: absolute;
     top: 4px;
@@ -240,6 +256,8 @@
     height: 25px;
     border-radius: 50%;
     cursor: pointer;
+    z-index: 9999 !important;
+    pointer-events: all !important;
 }
 
 .info-btn::before {
@@ -254,11 +272,13 @@
     color:#7DF9FF;
     justify-content: center;
     align-items: center;
-    z-index: 100;
+    z-index: 99999 !important;
     display: none;
     padding: 5px;
     border: 1px solid;
     border-radius: 11px;
+    position: fixed !important;
+    pointer-events: all !important;
 }
 
 .info-div.open {

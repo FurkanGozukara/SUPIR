@@ -431,14 +431,15 @@ document.addEventListener('click', (event) => {
         // Toggle the "fullscreen" class on the img object
         img.classList.toggle('full_screen');
     }
-    if (!event.target.classList.contains('info-btn')) {
+    // DISABLED auto-close for debugging - info bubbles stay for 60 seconds
+    /*if (!event.target.classList.contains('info-btn')) {
         let openInfoDivs = document.querySelectorAll('.info-btn.open');
         openInfoDivs.forEach((openDiv) => {
             openDiv.classList.remove('open');
             let infoDiv = openDiv.nextElementSibling;
             infoDiv.style.display = 'none';
         });
-    }
+    }*/
 });
 
 // Document ready
@@ -454,6 +455,7 @@ setTimeout(() => {
 
 
 function addInfoButtons() {
+    // Get elements with info-button class
     let infoButtons = document.querySelectorAll('.info-button');
     console.log('addInfoButtons', infoButtons.length, infoButtons);
     infoButtons.forEach((button) => {
@@ -510,6 +512,14 @@ function addInfoButtons() {
                         infoDiv.style.top = top + 'px';
                         infoDiv.style.position = 'fixed';
                         infoDiv.style.display = 'block';
+                        
+                        // Auto-hide after 10 seconds
+                        setTimeout(() => {
+                            if (div.classList.contains('open')) {
+                                div.classList.remove('open');
+                                infoDiv.style.display = 'none';
+                            }
+                        }, 10000); // 10 seconds
                     }
                 });
             } else {
