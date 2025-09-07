@@ -1571,7 +1571,7 @@ def llava_process(inputs: List[MediaData], temp, p, question=None, save_captions
         outputs.append(md)
         if save_captions:
             cap_path = os.path.splitext(img_path)[0] + ".txt"
-            with open(cap_path, 'w') as cf:
+            with open(cap_path, 'w', encoding='utf-8') as cf:
                 cf.write(caption)
         if not is_processing:  # Check if batch processing has been stopped
             break
@@ -2322,12 +2322,12 @@ def save_image(image_data: MediaData, is_video_frame: bool):
                 # This will save the caption to a file with the same name as the image
                 if save_caption:
                     caption_path = f'{os.path.splitext(save_path)[0]}.txt'
-                    with open(caption_path, 'w') as f:
+                    with open(caption_path, 'w', encoding='utf-8') as f:
                         f.write(caption)
             img.save(save_path, "PNG", pnginfo=meta)
 
             metadata_path = os.path.join(metadata_dir, f'{os.path.splitext(os.path.basename(save_path))[0]}.txt')
-            with open(metadata_path, 'w') as f:
+            with open(metadata_path, 'w', encoding='utf-8') as f:
                 for key, value in event_dict.items():
                     try:
                         f.write(f'{key}: {value}\n')
@@ -2673,7 +2673,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V91 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V92 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
