@@ -401,6 +401,34 @@ def safe_open_image(image_path):
         print(f"Error opening image: {str(e)}")
         raise
 
+def sanitize_filename_part(text):
+    """Sanitize a string to be safe for use in filenames."""
+    if not text:
+        return ""
+    
+    # Characters that are invalid in Windows filenames
+    invalid_chars = '<>:"/\\|?*'
+    # Additional problematic characters
+    invalid_chars += '\x00\r\n\t'
+    
+    # Replace invalid characters with underscore
+    sanitized = text
+    for char in invalid_chars:
+        sanitized = sanitized.replace(char, '_')
+    
+    # Remove control characters (0-31) and DEL (127)
+    sanitized = ''.join(char if ord(char) > 31 and ord(char) != 127 else '_' for char in sanitized)
+    
+    # Remove leading/trailing spaces and dots (Windows doesn't like them)
+    sanitized = sanitized.strip(' .')
+    
+    # Limit length to prevent issues (keep it reasonable for prefix/suffix)
+    max_length = 50
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length]
+    
+    return sanitized
+
 def apply_metadata(image_path):
     global elements_dict, extra_info_elements
     
@@ -2032,7 +2060,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
 
 def batch_process(img_data,
                   a_prompt, ae_dtype, apply_bg, apply_face, apply_face_only, apply_llava, apply_supir, ckpt_select, color_fix_type,
-                  diff_dtype, edm_steps, face_prompt, face_resolution, first_downscale, linear_CFG, linear_s_stage2,
+                  diff_dtype, edm_steps, face_prompt, face_resolution, filename_prefix, filename_suffix, first_downscale, linear_CFG, linear_s_stage2,
                   make_comparison_video, model_select, n_prompt, num_images, num_samples, qs, random_seed,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
                   spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, skip_existing_images, progress=gr.Progress()
@@ -2159,17 +2187,23 @@ def batch_process(img_data,
         filtered_img_data = []
         skipped_count = 0
         
+        # Get prefix and suffix from params and sanitize them
+        filename_prefix = sanitize_filename_part(params.get('filename_prefix', ''))
+        filename_suffix = sanitize_filename_part(params.get('filename_suffix', ''))
+        
         for image_data in img_data:
             image_path = image_data.media_path
             base_filename = os.path.splitext(os.path.basename(image_path))[0]
             if len(base_filename) > 250:
                 base_filename = base_filename[:250]
             
-            target_path = os.path.join(output_dir, f'{base_filename}.png')
+            # Apply prefix and suffix to the target filename
+            final_filename = f'{filename_prefix}{base_filename}{filename_suffix}'
+            target_path = os.path.join(output_dir, f'{final_filename}.png')
             
             # Check if the target file already exists
             if os.path.exists(target_path):
-                printt(f"Skipping {base_filename}.png - already exists in target folder")
+                printt(f"Skipping {final_filename}.png - already exists in target folder")
                 skipped_count += 1
             else:
                 filtered_img_data.append(image_data)
@@ -2284,9 +2318,17 @@ def save_image(image_data: MediaData, is_video_frame: bool):
 
         evt_id = event_dict.get('evt_id', str(time.time_ns()))
 
+        # Get the base filename and extension
         base_filename = os.path.splitext(os.path.basename(image_path))[0]
         if len(base_filename) > 250:
             base_filename = base_filename[:250]
+        
+        # Apply prefix and suffix from params and sanitize them
+        filename_prefix = sanitize_filename_part(params.get('filename_prefix', ''))
+        filename_suffix = sanitize_filename_part(params.get('filename_suffix', ''))
+        
+        # Construct the filename with prefix and suffix
+        final_filename = f'{filename_prefix}{base_filename}{filename_suffix}'
 
         img = Image.fromarray(result)
 
@@ -2297,7 +2339,7 @@ def save_image(image_data: MediaData, is_video_frame: bool):
                 f.write(str(event_dict))
             img.save(os.path.join(history_path, f'HQ_{i}.png'))
 
-        save_path = os.path.join(output_dir, f'{base_filename}.png')
+        save_path = os.path.join(output_dir, f'{final_filename}.png')
 
         # If processing video, just save the image
         if is_video_frame:
@@ -2306,7 +2348,7 @@ def save_image(image_data: MediaData, is_video_frame: bool):
         else:
             index = 1
             while os.path.exists(save_path):
-                save_path = os.path.join(output_dir, f'{base_filename}_{str(index).zfill(4)}.png')
+                save_path = os.path.join(output_dir, f'{final_filename}_{str(index).zfill(4)}.png')
                 index += 1
             remove_keys = ["face_gallery"]
             meta = PngImagePlugin.PngInfo()
@@ -2350,13 +2392,19 @@ def save_compare_video(image_data: MediaData, params):
         os.makedirs(compare_videos_dir)
 
     base_filename = os.path.splitext(os.path.basename(image_path))[0]
-    save_path = os.path.join(output_dir, f'{base_filename}.mp4')
+    
+    # Apply prefix and suffix from params and sanitize them
+    filename_prefix = sanitize_filename_part(params.get('filename_prefix', ''))
+    filename_suffix = sanitize_filename_part(params.get('filename_suffix', ''))
+    final_filename = f'{filename_prefix}{base_filename}{filename_suffix}'
+    
+    save_path = os.path.join(output_dir, f'{final_filename}.mp4')
     index = 1
     while os.path.exists(save_path):
-        save_path = os.path.join(output_dir, f'{base_filename}_{str(index).zfill(4)}.mp4')
+        save_path = os.path.join(output_dir, f'{final_filename}_{str(index).zfill(4)}.mp4')
         index += 1
 
-    video_path = os.path.join(compare_videos_dir, f'{base_filename}.mp4')
+    video_path = os.path.join(compare_videos_dir, f'{final_filename}.mp4')
     video_path = os.path.abspath(video_path)
     full_save_image_path = os.path.abspath(image_data.outputs[0])
     org_image_absolute_path = os.path.abspath(image_path)
@@ -2676,7 +2724,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V94 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V95 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2815,6 +2863,15 @@ with (block):
                         # Add Open Outputs Folder button
                         btn_open_outputs = gr.Button("Open Outputs Folder")
                         btn_open_outputs.click(fn=open_folder)
+                    with gr.Row():
+                        filename_prefix_textbox = gr.Textbox(
+                            label="Filename Prefix",
+                            placeholder="e.g., upscaled_",
+                            value="")
+                        filename_suffix_textbox = gr.Textbox(
+                            label="Filename Suffix (before extension)",
+                            placeholder="e.g., _hq",
+                            value="")
                     with gr.Row():
                         with gr.Column():
                             batch_process_folder_textbox = gr.Textbox(
@@ -3231,6 +3288,8 @@ with (block):
         "edm_steps": edm_steps_slider,
         "face_prompt": face_prompt_textbox,
         "face_resolution": face_resolution_slider,
+        "filename_prefix": filename_prefix_textbox,
+        "filename_suffix": filename_suffix_textbox,
         "first_downscale": first_downscale_checkbox,
         "linear_CFG": linear_cfg_checkbox,
         "linear_s_stage2": linear_s_stage2_checkbox,
