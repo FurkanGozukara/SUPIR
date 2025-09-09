@@ -566,6 +566,7 @@ batch_total_count = 0
 batch_processed_count = 0
 batch_processing_times = []
 batch_current_stage = ""
+batch_current_image_name = ""
 
 
 print(f"App startup: is_processing = {is_processing}")
@@ -601,7 +602,7 @@ def get_progress_display_html(title, content):
 
 def get_batch_progress_html():
     """Generate HTML for persistent batch progress display"""
-    global batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage
+    global batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage, batch_current_image_name
     
     if not is_processing or batch_total_count == 0:
         return ""
@@ -671,6 +672,7 @@ def get_batch_progress_html():
         <div style="text-align: center; font-size: 10px; color: rgba(255,255,255,0.8); font-style: italic; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 4px;">
             {batch_current_stage}
         </div>
+        {f'<div style="text-align: center; font-size: 11px; color: rgba(255,255,255,0.9); margin-top: 4px; background: rgba(76,175,80,0.2); padding: 4px; border-radius: 4px; font-weight: bold;">📄 {batch_current_image_name}</div>' if batch_current_image_name else ''}
     """
     
     html = get_progress_display_html("🚀 BATCH PROCESSING", progress_content)
@@ -1632,7 +1634,7 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                   ckpt_select, num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
                   face_prompt, max_megapixels, max_resolution, first_downscale, apply_face_only=False, dont_update_progress=False, unload=True,
                   progress=gr.Progress()):
-    global model, status_container, event_id, batch_processed_count, batch_processing_times, batch_current_stage, batch_total_count, batch_start_time
+    global model, status_container, event_id, batch_processed_count, batch_processing_times, batch_current_stage, batch_total_count, batch_start_time, batch_current_image_name
     main_begin_time = time.time()
     
     # Ensure all parameters are of the correct type
@@ -1706,6 +1708,9 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
         
         # Update batch progress
         batch_current_stage = f"Processing image {batch_processed_count + 1}/{batch_total_count}"
+        # Extract and update current image name
+        image_name = os.path.basename(image_path) if image_path else "Unknown"
+        batch_current_image_name = image_name
         
         # Show batch metrics in the progress description where it's always visible
         batch_info = ""
@@ -2065,7 +2070,7 @@ def batch_process(img_data,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
                   spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, skip_existing_images, progress=gr.Progress()
                   ):
-    global is_processing, llava_agent, model, status_container, batch_total_count, batch_start_time, batch_processed_count, batch_processing_times, batch_current_stage
+    global is_processing, llava_agent, model, status_container, batch_total_count, batch_start_time, batch_processed_count, batch_processing_times, batch_current_stage, batch_current_image_name
     print(f"batch_process called: is_processing = {is_processing}")
     
     # Safety check: if is_processing is True but we're being called from a fresh start,
@@ -2284,6 +2289,7 @@ def batch_process(img_data,
     batch_total_count = 0
     batch_processed_count = 0
     batch_processing_times = []
+    batch_current_image_name = ""
     end_time = time.time()
     global unique_counter
     unique_counter = unique_counter + 1
@@ -2724,7 +2730,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V95 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V96 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
