@@ -903,6 +903,67 @@ def selected_model():
     return None
 
 
+def list_loras():
+    """List all LoRA files in the models/Lora or models/lora directory (case-insensitive)."""
+    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+    output = ["None"]  # Add None as the first option
+
+    # Check for different case variations of the Lora folder
+    possible_dirs = ['Lora', 'lora', 'LORA', 'LoRA']
+    lora_dir = None
+
+    for dir_name in possible_dirs:
+        test_dir = os.path.join(models_dir, dir_name)
+        if os.path.exists(test_dir):
+            lora_dir = test_dir
+            break
+
+    # If no directory found, try case-insensitive search on the filesystem
+    if not lora_dir and os.path.exists(models_dir):
+        for item in os.listdir(models_dir):
+            if item.lower() == 'lora':
+                lora_dir = os.path.join(models_dir, item)
+                break
+
+    if lora_dir and os.path.exists(lora_dir):
+        lora_files = [f for f in os.listdir(lora_dir) if f.endswith('.safetensors') or f.endswith('.ckpt')]
+        output.extend(sorted(lora_files))
+
+    return output
+
+
+def get_lora_path(lora_filename):
+    """Get the full path to a LoRA file (case-insensitive directory search)."""
+    if lora_filename == "None" or not lora_filename:
+        return None
+
+    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+
+    # Check for different case variations of the Lora folder
+    possible_dirs = ['Lora', 'lora', 'LORA', 'LoRA']
+    lora_dir = None
+
+    for dir_name in possible_dirs:
+        test_dir = os.path.join(models_dir, dir_name)
+        if os.path.exists(test_dir):
+            lora_dir = test_dir
+            break
+
+    # If no directory found, try case-insensitive search on the filesystem
+    if not lora_dir and os.path.exists(models_dir):
+        for item in os.listdir(models_dir):
+            if item.lower() == 'lora':
+                lora_dir = os.path.join(models_dir, item)
+                break
+
+    if lora_dir:
+        lora_path = os.path.join(lora_dir, lora_filename)
+        if os.path.exists(lora_path):
+            return lora_path
+
+    return None
+
+
 def load_face_helper():
     global face_helper
     if face_helper is None:
@@ -915,15 +976,63 @@ def load_face_helper():
         )
 
 
-def load_model(selected_model, selected_checkpoint, weight_dtype, sampler='DPMPP2M', device='cpu', progress=gr.Progress()):
-    global model, last_used_checkpoint
+def load_model(selected_model, selected_checkpoint, weight_dtype, sampler='DPMPP2M', device='cpu',
+               lora_configs=None, cache_base_model=False, progress=gr.Progress()):
+    global model, last_used_checkpoint, last_used_loras
+
+    # Initialize cache attributes if they don't exist
+    if not hasattr(load_model, 'cached_base_state'):
+        load_model.cached_base_state = None
+        load_model.cached_checkpoint = None
+        load_model.cached_model_type = None
 
     # Determine the need for model loading or updating
     need_to_load_model = last_used_checkpoint is None or last_used_checkpoint != selected_checkpoint
     need_to_update_model = selected_model != (model.current_model if model else None)
-    if need_to_update_model:
+
+    # Check if LoRA configuration has changed
+    loras_changed = False
+    if hasattr(load_model, 'last_used_loras'):
+        loras_changed = load_model.last_used_loras != lora_configs
+    else:
+        load_model.last_used_loras = None
+
+    # Check if we can use cached base model
+    can_use_cache = (
+        cache_base_model and
+        load_model.cached_base_state is not None and
+        load_model.cached_checkpoint == selected_checkpoint and
+        load_model.cached_model_type == selected_model and
+        not need_to_update_model and
+        not need_to_load_model
+    )
+
+    if can_use_cache and loras_changed and model is not None:
+        # Fast LoRA switch - restore base weights and apply new LoRAs
+        printt("Fast LoRA switch: Restoring base model from cache and applying new LoRAs")
+
+        # Restore base model weights from cache
+        for name, param in model.model.named_parameters():
+            if name in load_model.cached_base_state:
+                param.data = load_model.cached_base_state[name].clone()
+
+        # Apply new LoRAs if any
+        if lora_configs:
+            from SUPIR.util import apply_multiple_loras
+            apply_multiple_loras(model, lora_configs)
+
+        load_model.last_used_loras = lora_configs
+        printt(f"Fast LoRA switch completed - applied {len(lora_configs) if lora_configs else 0} LoRA(s)")
+        return  # Skip full model reload
+
+    if need_to_update_model or (loras_changed and not can_use_cache):
         del model
         model = None
+        # Clear cache if model type changes
+        if need_to_update_model:
+            load_model.cached_base_state = None
+            load_model.cached_checkpoint = None
+            load_model.cached_model_type = None
 
     # Resolve checkpoint path
     checkpoint_paths = [
@@ -936,17 +1045,35 @@ def load_model(selected_model, selected_checkpoint, weight_dtype, sampler='DPMPP
         raise FileNotFoundError(f"Checkpoint {selected_checkpoint} not found.")
 
     # Check if we need to load a new model
-    if need_to_load_model or model is None:
+    if need_to_load_model or model is None or loras_changed:
         torch.cuda.empty_cache()
         last_used_checkpoint = checkpoint_use
+        load_model.last_used_loras = lora_configs
         model_cfg = "options/SUPIR_v0_tiled.yaml" if args.use_tile_vae else "options/SUPIR_v0.yaml"
         weight_dtype = 'fp16' if not bf16_supported else weight_dtype
         model = create_SUPIR_model(model_cfg, weight_dtype, supir_sign=selected_model[-1], device=device, ckpt=checkpoint_use,
-                                   sampler=sampler)
+                                   sampler=sampler, lora_configs=lora_configs)
         model.current_model = selected_model
-     
+
         if args.use_tile_vae:
             model.init_tile_vae(encoder_tile_size=512, decoder_tile_size=64, use_fast=args.use_fast_tile)
+
+        # Cache the base model if requested
+        if cache_base_model and not lora_configs:
+            printt("Caching base model weights for fast LoRA switching...")
+            load_model.cached_base_state = {}
+            for name, param in model.model.named_parameters():
+                # Only cache layers that LoRAs typically modify
+                if any(key in name for key in ['attn', 'to_k', 'to_v', 'to_q', 'to_out', 'proj', 'mlp']):
+                    load_model.cached_base_state[name] = param.data.clone()
+
+            load_model.cached_checkpoint = selected_checkpoint
+            load_model.cached_model_type = selected_model
+            printt(f"Cached {len(load_model.cached_base_state)} layer weights for fast switching")
+        elif cache_base_model and lora_configs:
+            # Cache base model BEFORE applying LoRAs
+            printt("Note: Base model will be cached on next run without LoRAs")
+
         if progress is not None:
             progress(1, desc="SUPIR loaded.")
 
@@ -1632,7 +1759,10 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
                   s_stage1, s_stage2, s_cfg, seed, sampler, s_churn, s_noise, color_fix_type, diff_dtype, ae_dtype,
                   linear_cfg, linear_s_stage2, spt_linear_cfg, spt_linear_s_stage2, model_select,
                   ckpt_select, num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
-                  face_prompt, max_megapixels, max_resolution, first_downscale, apply_face_only=False, dont_update_progress=False, unload=True,
+                  face_prompt, max_megapixels, max_resolution, first_downscale,
+                  lora_1=None, lora_1_weight=1.0, lora_2=None, lora_2_weight=1.0,
+                  lora_3=None, lora_3_weight=1.0, lora_4=None, lora_4_weight=1.0,
+                  cache_base_model=False, apply_face_only=False, dont_update_progress=False, unload=True,
                   progress=gr.Progress()):
     global model, status_container, event_id, batch_processed_count, batch_processing_times, batch_current_stage, batch_total_count, batch_start_time, batch_current_image_name
     main_begin_time = time.time()
@@ -1677,9 +1807,21 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
     if unload:
         total_progress += 1
     counter = 0
+    # Prepare LoRA configurations
+    lora_configs = []
+    for i in range(1, 5):
+        lora_name = locals().get(f'lora_{i}')
+        lora_weight = locals().get(f'lora_{i}_weight', 1.0)
+        if lora_name and lora_name != "None":
+            lora_path = get_lora_path(lora_name)
+            if lora_path:
+                lora_configs.append((lora_path, lora_weight))
+
     batch_info = f" [BATCH: {batch_processed_count}/{batch_total_count} images queued]" if batch_total_count > 0 else ""
     progress(counter / total_progress, desc=f"Loading SUPIR Model...{batch_info}")
-    load_model(model_select, ckpt_select, diff_dtype, sampler, progress=progress)
+    load_model(model_select, ckpt_select, diff_dtype, sampler, device=SUPIR_device,
+               lora_configs=lora_configs if lora_configs else None,
+               cache_base_model=cache_base_model, progress=progress)
     to_gpu(model, SUPIR_device)
 
     counter += 1
@@ -1859,6 +2001,14 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
         for _ in range(num_images):
             gen_params = img_params.copy()
             gen_params['evt_id'] = event_id
+
+            # Add LoRA information to metadata
+            for i in range(1, 5):
+                lora_name = locals().get(f'lora_{i}')
+                lora_weight = locals().get(f'lora_{i}_weight', 1.0)
+                if lora_name and lora_name != "None":
+                    gen_params[f'lora_{i}'] = lora_name
+                    gen_params[f'lora_{i}_weight'] = lora_weight
             result = None
             if random_seed or num_images > 1:
                 seed = np.random.randint(0, 2147483647)
@@ -2064,8 +2214,9 @@ def supir_process(inputs: List[MediaData], a_prompt, n_prompt, num_samples,
 
 
 def batch_process(img_data,
-                  a_prompt, ae_dtype, apply_bg, apply_face, apply_face_only, apply_llava, apply_supir, ckpt_select, color_fix_type,
+                  a_prompt, ae_dtype, apply_bg, apply_face, apply_face_only, apply_llava, apply_supir, cache_base_model, ckpt_select, color_fix_type,
                   diff_dtype, edm_steps, face_prompt, face_resolution, filename_prefix, filename_suffix, first_downscale, linear_CFG, linear_s_stage2,
+                  lora_1, lora_1_weight, lora_2, lora_2_weight, lora_3, lora_3_weight, lora_4, lora_4_weight,
                   make_comparison_video, model_select, n_prompt, num_images, num_samples, qs, random_seed,
                   s_cfg, s_churn, s_noise, s_stage1, s_stage2, sampler, save_captions, seed, spt_linear_CFG,
                   spt_linear_s_stage2, temperature, top_p, upscale, max_megapixels, max_resolution, auto_unload_llava, skip_llava_if_txt_exists, skip_existing_images, progress=gr.Progress()
@@ -2248,7 +2399,9 @@ def batch_process(img_data,
                                     linear_CFG, linear_s_stage2, spt_linear_CFG, spt_linear_s_stage2, model_select,
                                     ckpt_select,
                                     num_images, random_seed, apply_llava, face_resolution, apply_bg, apply_face,
-                                    face_prompt, max_megapixels, max_resolution, first_downscale, apply_face_only, unload=True, progress=progress)
+                                    face_prompt, max_megapixels, max_resolution, first_downscale,
+                                    lora_1, lora_1_weight, lora_2, lora_2_weight, lora_3, lora_3_weight, lora_4, lora_4_weight,
+                                    cache_base_model, apply_face_only, unload=True, progress=progress)
         printt("Processing images (Stage 2) Completed")
     counter += total_supir_steps
     progress(counter / total_steps, desc="Processing completed.")
@@ -2613,6 +2766,18 @@ body.gradio-loading #batch_progress_display,
     opacity: 1 !important;
     visibility: visible !important;
 }}
+
+/* Simple fix for dropdown visibility in accordions */
+/* Allow overflow for accordion content to show dropdowns */
+details[open] > div:last-child {{
+    overflow: visible !important;
+}}
+
+/* Increase z-index for dropdown lists to appear above other elements */
+ul[role="listbox"],
+.choices__list--dropdown {{
+    z-index: 10000 !important;
+}}
 </style>
 <script type="text/javascript">{js}</script>
 <script type="text/javascript">{no_slider}</script>
@@ -2730,7 +2895,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V97 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V98 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2963,6 +3128,51 @@ with (block):
                             apply_face_only_checkbox = gr.Checkbox(label="Only Face Restoration", value=False)
                     apply_bg_checkbox = gr.Checkbox(label="BG restoration", value=False, visible=False)
 
+                with gr.Accordion("LoRA Settings", open=False):
+                    gr.Markdown("Configure up to 4 LoRAs with individual weights. Place your LoRA files in the `models/Lora` folder.")
+
+                    lora_dropdowns = []
+                    lora_weight_sliders = []
+
+                    for i in range(1, 5):
+                        with gr.Row():
+                            lora_dropdown = gr.Dropdown(
+                                label=f"LoRA {i}",
+                                choices=list_loras(),
+                                value="None",
+                                interactive=True,
+                                scale=3
+                            )
+                            lora_weight = gr.Slider(
+                                label=f"Weight {i}",
+                                minimum=0.01,
+                                maximum=9.9,
+                                value=1.0,
+                                step=0.01,
+                                interactive=True,
+                                scale=1
+                            )
+                            lora_dropdowns.append(lora_dropdown)
+                            lora_weight_sliders.append(lora_weight)
+
+                    # Place refresh button and cache option below all LoRA options
+                    with gr.Row():
+                        refresh_loras_button = gr.Button("🔄 Refresh LoRA List", variant="secondary", scale=2)
+                        cache_base_model_checkbox = gr.Checkbox(
+                            label="Fast LoRA Switch (Keep base in RAM)",
+                            value=False,
+                            info="Uses more RAM but allows instant LoRA switching without model reload",
+                            scale=3
+                        )
+
+                    def refresh_lora_list():
+                        lora_choices = list_loras()
+                        return [gr.update(choices=lora_choices) for _ in range(4)]
+
+                    refresh_loras_button.click(
+                        fn=refresh_lora_list,
+                        outputs=lora_dropdowns
+                    )
 
                 with gr.Accordion("Presets", open=True):
                     presets_dir = os.path.join(os.path.dirname(__file__), 'presets')
@@ -3335,6 +3545,14 @@ with (block):
         "video_start": video_start_time_number,
         "video_width": video_width_textbox,
     }
+
+    # Add LoRA elements to elements_dict
+    for i, (lora_dropdown, lora_weight) in enumerate(zip(lora_dropdowns, lora_weight_sliders), 1):
+        elements_dict[f"lora_{i}"] = lora_dropdown
+        elements_dict[f"lora_{i}_weight"] = lora_weight
+
+    # Add cache checkbox to elements_dict
+    elements_dict["cache_base_model"] = cache_base_model_checkbox
 
     extra_info_elements = {
         "prompt_style": prompt_style_dropdown,

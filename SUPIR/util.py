@@ -31,7 +31,115 @@ def load_state_dict(ckpt_path, location='cpu'):
     return state_dict
 
 
-def create_SUPIR_model(config_path, weight_dtype='bf16', supir_sign=None, device='cpu', ckpt=None, sampler="DPMPP2M"):
+def apply_lora_to_model(model, lora_path, alpha=1.0):
+    """
+    Apply a single LoRA to the model with the given alpha/weight.
+    This modifies the model weights in-place by merging the LoRA.
+    """
+    if not lora_path or not os.path.exists(lora_path):
+        return
+
+    printt(f'Applying LoRA from [{lora_path}] with weight {alpha}')
+
+    try:
+        import safetensors.torch
+        lora_sd = safetensors.torch.load_file(lora_path, device='cpu')
+    except:
+        printt(f'Failed to load LoRA from [{lora_path}]')
+        return
+
+    # Get all LoRA keys and find the unique layer names
+    lora_layers = {}
+    for key in lora_sd.keys():
+        if 'lora_up' in key:
+            layer_name = key.replace('.lora_up.weight', '').replace('lora_unet_', '').replace('lora_te_', '')
+            up_key = key
+            down_key = key.replace('lora_up', 'lora_down')
+
+            if down_key in lora_sd:
+                lora_layers[layer_name] = {
+                    'up': lora_sd[up_key],
+                    'down': lora_sd[down_key]
+                }
+
+    # Apply LoRA weights to the model
+    applied_count = 0
+    for name, param in model.model.named_parameters():
+        # Convert parameter name to match LoRA naming convention
+        lora_name = name.replace('.', '_')
+
+        # Check various LoRA naming patterns
+        for lora_layer_name, lora_weights in lora_layers.items():
+            if lora_layer_name in lora_name or lora_name in lora_layer_name:
+                try:
+                    # Apply LoRA: weight = weight + alpha * (up @ down)
+                    up_weight = lora_weights['up'].to(param.device).to(param.dtype)
+                    down_weight = lora_weights['down'].to(param.device).to(param.dtype)
+
+                    # Handle different layer types
+                    if len(param.shape) == 4:  # Conv2d weights: [out_channels, in_channels, H, W]
+                        if len(down_weight.shape) == 4:
+                            # Conv2d LoRA weights
+                            # Reshape for matrix multiplication
+                            out_ch, in_ch = param.shape[0], param.shape[1]
+                            kernel_size = param.shape[2:]
+
+                            # Reshape down: [rank, in_ch * k * k] -> [rank, in_ch]
+                            down_weight = down_weight.flatten(1)
+                            # Reshape up: [out_ch * k * k, rank] -> [out_ch, rank]
+                            up_weight = up_weight.flatten(1)
+
+                            # Compute LoRA weight
+                            lora_weight = alpha * torch.mm(up_weight, down_weight)
+
+                            # Reshape back to conv shape
+                            lora_weight = lora_weight.reshape(param.shape)
+                        else:
+                            # Linear LoRA applied to Conv - skip this combination
+                            continue
+
+                    elif len(param.shape) == 2:  # Linear weights: [out_features, in_features]
+                        if len(down_weight.shape) == 2:
+                            # Linear LoRA weights - standard matrix multiplication
+                            lora_weight = alpha * torch.mm(up_weight, down_weight)
+                        else:
+                            # Conv LoRA applied to Linear - skip this combination
+                            continue
+
+                    elif len(param.shape) == 1:  # Bias or norm parameters
+                        # LoRA typically doesn't apply to bias/norm params
+                        continue
+                    else:
+                        # Unknown shape - skip
+                        continue
+
+                    # Ensure shapes match before adding
+                    if lora_weight.shape != param.shape:
+                        printt(f'Shape mismatch for {name}: param {param.shape} vs lora {lora_weight.shape}, skipping')
+                        continue
+
+                    param.data += lora_weight
+                    applied_count += 1
+                    break
+
+                except Exception as e:
+                    printt(f'Error applying LoRA to {name}: {e}, skipping')
+                    continue
+
+    printt(f'Applied LoRA to {applied_count} layers')
+
+
+def apply_multiple_loras(model, lora_configs):
+    """
+    Apply multiple LoRAs to the model.
+    lora_configs: list of tuples (lora_path, weight)
+    """
+    for lora_path, weight in lora_configs:
+        if lora_path and weight != 0:
+            apply_lora_to_model(model, lora_path, weight)
+
+
+def create_SUPIR_model(config_path, weight_dtype='bf16', supir_sign=None, device='cpu', ckpt=None, sampler="DPMPP2M", lora_configs=None):
     # Load the model configuration
     config = OmegaConf.load(config_path)
     config.model.params.sampler_config.target = sampler
@@ -42,12 +150,12 @@ def create_SUPIR_model(config_path, weight_dtype='bf16', supir_sign=None, device
         'first_stage_model': None,
         'alphas_cumprod': None,
         '': convert_dtype(weight_dtype),
-    }   
+    }
     # Instantiate model from config
     printt(f'Loading model from [{config_path}]')
     if shared.opts.fast_load_sd:
         with sd_model_initialization.DisableInitialization(disable_clip=False):
-            with sd_model_initialization.InitializeOnMeta():    
+            with sd_model_initialization.InitializeOnMeta():
                 model = instantiate_from_config(config.model)
     else:
         model = instantiate_from_config(config.model)
@@ -64,8 +172,8 @@ def create_SUPIR_model(config_path, weight_dtype='bf16', supir_sign=None, device
                 tgt_device = 'cpu'
             state_dict = load_state_dict(checkpoint_path, tgt_device)
             with sd_model_initialization.LoadStateDictOnMeta(state_dict, device=model.device, weight_dtype_conversion=weight_dtype_conversion):
-                models_utils.load_model_weights(model, state_dict)  
-            torch_gc()            
+                models_utils.load_model_weights(model, state_dict)
+            torch_gc()
             printt(f'Loaded state_dict from [{checkpoint_path}]')
         else:
             printt(f'No checkpoint found at [{checkpoint_path}]')
@@ -78,6 +186,11 @@ def create_SUPIR_model(config_path, weight_dtype='bf16', supir_sign=None, device
         assert supir_sign in ['F', 'Q'], "supir_sign must be either 'F' or 'Q'"
         ckpt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models", f"v0{supir_sign}.ckpt"))
         load_to_device(ckpt_path)
+
+    # Apply LoRAs if provided
+    if lora_configs:
+        printt(f'Applying {len(lora_configs)} LoRA(s)')
+        apply_multiple_loras(model, lora_configs)
 
     model.sampler = sampler
     printt(f'Loaded model config from [{config_path}] and moved to {device}')
