@@ -10,6 +10,7 @@ from facexlib.parsing import init_parsing_model
 from facexlib.utils.misc import img2tensor, imwrite
 
 from .file import load_file_from_url
+from .face_detection_helper import init_detection_model_with_local_check
 
 
 def get_largest_face(det_faces, h, w):
@@ -110,8 +111,23 @@ class FaceRestoreHelper(object):
         else:
             self.device = device
 
-        # init face detection model
-        self.face_detector = init_detection_model(det_model, half=False, device=self.device)
+        # init face detection model - first check local models folder
+        # Get the path to SUPIR/models folder
+        current_file_dir = os.path.dirname(os.path.abspath(__file__))
+        supir_root = os.path.dirname(os.path.dirname(current_file_dir))
+        local_models_dir = os.path.join(supir_root, 'SUPIR', 'models')
+
+        # Try to use the custom init with local check first
+        try:
+            self.face_detector = init_detection_model_with_local_check(
+                det_model,
+                half=False,
+                device=self.device,
+                local_model_dir=local_models_dir
+            )
+        except Exception as e:
+            print(f"Failed to load with local check: {e}. Falling back to default loader.")
+            self.face_detector = init_detection_model(det_model, half=False, device=self.device)
 
         # init face parsing model
         self.use_parse = use_parse
