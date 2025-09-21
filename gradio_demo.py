@@ -299,6 +299,8 @@ parser.add_argument("--ckpt", type=str, default='Juggernaut-XL_v9_RunDiffusionPh
 parser.add_argument("--ckpt_browser", action='store_true', default=True, help="Enable a checkpoint selection dropdown.")
 parser.add_argument("--ckpt_dir", type=str, default='models/checkpoints',
                     help="Directory where model checkpoints are stored.")
+parser.add_argument("--lora_dir", type=str, default='models/Lora',
+                    help="Directory where LoRA files are stored.")
 parser.add_argument("--theme", type=str, default='default',
                     help="Theme for the UI. Use 'default' or specify a custom theme.")
 parser.add_argument("--open_browser", action='store_true', default=True,
@@ -529,10 +531,19 @@ server_ip = args.ip
 if args.debug:
     args.open_browser = False
 
-if args.ckpt_dir == "models/checkpoints":
+# Normalize checkpoint directory path
+if not os.path.isabs(args.ckpt_dir):
     args.ckpt_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
-    if not os.path.exists(args.ckpt_dir):
-        os.makedirs(args.ckpt_dir, exist_ok=True)
+args.ckpt_dir = os.path.abspath(os.path.normpath(args.ckpt_dir))
+if not os.path.exists(args.ckpt_dir):
+    os.makedirs(args.ckpt_dir, exist_ok=True)
+
+# Normalize LoRA directory path
+if not os.path.isabs(args.lora_dir):
+    args.lora_dir = os.path.join(os.path.dirname(__file__), args.lora_dir)
+args.lora_dir = os.path.abspath(os.path.normpath(args.lora_dir))
+if not os.path.exists(args.lora_dir):
+    os.makedirs(args.lora_dir, exist_ok=True)
 
 if torch.cuda.device_count() >= 2:
     SUPIR_device = 'cuda:0'
@@ -826,11 +837,6 @@ def list_models():
     if os.path.exists(model_dir):
         output = [os.path.join(model_dir, f) for f in os.listdir(model_dir) if
                   f.endswith('.safetensors') or f.endswith('.ckpt')]
-    else:
-        local_model_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
-        if os.path.exists(local_model_dir):
-            output = [os.path.join(local_model_dir, f) for f in os.listdir(local_model_dir) if
-                      f.endswith('.safetensors') or f.endswith('.ckpt')]
     if os.path.exists(args.ckpt) and args.ckpt not in output:
         output.append(args.ckpt)
     else:
@@ -848,11 +854,9 @@ def get_ckpt_path(ckpt_path):
     if os.path.exists(ckpt_path):
         return ckpt_path
     else:
-        if os.path.exists(args.ckpt_dir):
-            return os.path.join(args.ckpt_dir, ckpt_path)
-        local_model_dir = os.path.join(os.path.dirname(__file__), args.ckpt_dir)
-        if os.path.exists(local_model_dir):
-            return os.path.join(local_model_dir, ckpt_path)
+        full_path = os.path.join(args.ckpt_dir, ckpt_path)
+        if os.path.exists(full_path):
+            return full_path
     return None
 
 
@@ -904,62 +908,24 @@ def selected_model():
 
 
 def list_loras():
-    """List all LoRA files in the models/Lora or models/lora directory (case-insensitive)."""
-    models_dir = os.path.join(os.path.dirname(__file__), 'models')
+    """List all LoRA files in the specified LoRA directory."""
     output = ["None"]  # Add None as the first option
 
-    # Check for different case variations of the Lora folder
-    possible_dirs = ['Lora', 'lora', 'LORA', 'LoRA']
-    lora_dir = None
-
-    for dir_name in possible_dirs:
-        test_dir = os.path.join(models_dir, dir_name)
-        if os.path.exists(test_dir):
-            lora_dir = test_dir
-            break
-
-    # If no directory found, try case-insensitive search on the filesystem
-    if not lora_dir and os.path.exists(models_dir):
-        for item in os.listdir(models_dir):
-            if item.lower() == 'lora':
-                lora_dir = os.path.join(models_dir, item)
-                break
-
-    if lora_dir and os.path.exists(lora_dir):
-        lora_files = [f for f in os.listdir(lora_dir) if f.endswith('.safetensors') or f.endswith('.ckpt')]
+    if os.path.exists(args.lora_dir):
+        lora_files = [f for f in os.listdir(args.lora_dir) if f.endswith('.safetensors') or f.endswith('.ckpt')]
         output.extend(sorted(lora_files))
 
     return output
 
 
 def get_lora_path(lora_filename):
-    """Get the full path to a LoRA file (case-insensitive directory search)."""
+    """Get the full path to a LoRA file."""
     if lora_filename == "None" or not lora_filename:
         return None
 
-    models_dir = os.path.join(os.path.dirname(__file__), 'models')
-
-    # Check for different case variations of the Lora folder
-    possible_dirs = ['Lora', 'lora', 'LORA', 'LoRA']
-    lora_dir = None
-
-    for dir_name in possible_dirs:
-        test_dir = os.path.join(models_dir, dir_name)
-        if os.path.exists(test_dir):
-            lora_dir = test_dir
-            break
-
-    # If no directory found, try case-insensitive search on the filesystem
-    if not lora_dir and os.path.exists(models_dir):
-        for item in os.listdir(models_dir):
-            if item.lower() == 'lora':
-                lora_dir = os.path.join(models_dir, item)
-                break
-
-    if lora_dir:
-        lora_path = os.path.join(lora_dir, lora_filename)
-        if os.path.exists(lora_path):
-            return lora_path
+    lora_path = os.path.join(args.lora_dir, lora_filename)
+    if os.path.exists(lora_path):
+        return lora_path
 
     return None
 
@@ -1037,8 +1003,7 @@ def load_model(selected_model, selected_checkpoint, weight_dtype, sampler='DPMPP
     # Resolve checkpoint path
     checkpoint_paths = [
         selected_checkpoint,
-        os.path.join(args.ckpt_dir, selected_checkpoint),
-        os.path.join(os.path.dirname(__file__), args.ckpt_dir, selected_checkpoint)
+        os.path.join(args.ckpt_dir, selected_checkpoint)
     ]
     checkpoint_use = next((path for path in checkpoint_paths if os.path.exists(path)), None)
     if checkpoint_use is None:
@@ -2895,7 +2860,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V99 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V100 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -3129,7 +3094,7 @@ with (block):
                     apply_bg_checkbox = gr.Checkbox(label="BG restoration", value=False, visible=False)
 
                 with gr.Accordion("LoRA Settings", open=False):
-                    gr.Markdown("Configure up to 4 LoRAs with individual weights. Place your LoRA files in the `models/Lora` folder.")
+                    gr.Markdown(f"Configure up to 4 LoRAs with individual weights. Place your LoRA files in the `{args.lora_dir}` folder.")
 
                     lora_dropdowns = []
                     lora_weight_sliders = []
