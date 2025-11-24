@@ -5,6 +5,7 @@ import datetime
 import gc
 import os
 import shutil
+import sys
 import tempfile
 import threading
 import time
@@ -1487,7 +1488,7 @@ def populate_gallery():
                                                                         elem_classes=["preview_slider", "preview_box"])
 
 
-def start_single_process(*element_values):
+def start_single_process(*element_values, progress=gr.Progress()):
     global status_container, is_processing, batch_total_count, batch_processed_count, batch_processing_times, batch_current_stage
     
     # Force reset processing state to handle any stuck flags
@@ -1504,15 +1505,21 @@ def start_single_process(*element_values):
     status_container.process_params = status_container.process_params or {}
     status_container.process_params['ckpt_type'] = ckpt_type.value
     
-    img_data = []
-    validate_upscale = float(values_dict.get('upscale', 1)) > 1 or values_dict.get('apply_face', False) or values_dict.get('apply_bg', False) or values_dict.get('apply_face_only', False)
-
+    # Check if auto_unload_models is enabled
+    auto_unload_models = values_dict.get('auto_unload_models', False)
+    
     input_image = values_dict['src_file']
     if input_image is None:
         return "No input image provided.", hide_batch_progress()
     
-    # Clear any previous completion message by immediately showing processing status
-    # This is a workaround since Gradio doesn't allow immediate UI updates during processing
+    # If auto_unload_models is enabled, use subprocess mode
+    if auto_unload_models:
+        # Subprocess mode - run in separate process for full memory cleanup
+        return run_single_in_subprocess(values_dict, progress)
+    
+    # Standard in-process mode below
+    img_data = []
+    validate_upscale = float(values_dict.get('upscale', 1)) > 1 or values_dict.get('apply_face', False) or values_dict.get('apply_bg', False) or values_dict.get('apply_face_only', False)
 
     image_files = [input_image]
 
@@ -1548,7 +1555,7 @@ def start_single_process(*element_values):
     # auto_unload_llava, batch_process_folder, main_prompt, output_video_format, output_video_quality, outputs_folder,video_duration, video_fps, video_height, video_width
     keys_to_pop = ['batch_process_folder', 'main_prompt', 'output_video_format',
                    'output_video_quality', 'outputs_folder', 'video_duration', 'video_end', 'video_fps',
-                   'video_height', 'video_start', 'video_width', 'src_file', 'ckpt_type']
+                   'video_height', 'video_start', 'video_width', 'src_file', 'ckpt_type', 'auto_unload_models']
 
     values_dict['outputs_folder'] = args.outputs_folder
     status_container.process_params = values_dict
@@ -1567,7 +1574,7 @@ def start_single_process(*element_values):
         # Override skip_existing_images to False for single image processing
         # Users expect single images to always be processed
         values_dict['skip_existing_images'] = False
-        _, result = batch_process(img_data, **values_dict)
+        _, result = batch_process(img_data, **values_dict, progress=progress)
         
         is_processing = False
     except Exception as e:
@@ -1580,7 +1587,7 @@ def start_single_process(*element_values):
 
 
 
-def start_batch_process(*element_values):
+def start_batch_process(*element_values, progress=gr.Progress()):
     global status_container, is_processing, batch_start_time, batch_processed_count, batch_total_count, batch_processing_times, batch_current_stage
     
     # Force reset processing state to handle any stuck flags
@@ -1604,23 +1611,34 @@ def start_batch_process(*element_values):
     status_container.process_params = status_container.process_params or {}
     status_container.process_params['ckpt_type'] = ckpt_type.value
     
+    # Check if auto_unload_models is enabled
+    auto_unload_models = values_dict.get('auto_unload_models', False)
+    
     batch_folder = values_dict.get('batch_process_folder')
     if not batch_folder:
         return "No input folder provided.", hide_batch_progress()
     if not os.path.exists(batch_folder):
         return "The input folder does not exist.", hide_batch_progress()
 
-    if len(values_dict['outputs_folder']) < 2:
+    if len(values_dict.get('outputs_folder', '')) < 2:
         values_dict['outputs_folder'] = args.outputs_folder
 
-    image_files = [file for file in os.listdir(batch_folder) if
+    image_files = [os.path.join(batch_folder, file) for file in os.listdir(batch_folder) if
                    is_image(os.path.join(batch_folder, file))]
+    
+    if not image_files:
+        return "No images found in the input folder.", hide_batch_progress()
+    
+    # If auto_unload_models is enabled, use subprocess mode
+    if auto_unload_models:
+        return run_batch_in_subprocess(values_dict, image_files, progress)
 
+    # Standard in-process mode below
     # Make a dictionary to store the image data and path
     img_data = []
-    for file in image_files:
-        media_data = MediaData(media_path=os.path.join(batch_folder, file))
-        img = safe_open_image(os.path.join(batch_folder, file))
+    for file_path in image_files:
+        media_data = MediaData(media_path=file_path)
+        img = safe_open_image(file_path)
         media_data.media_data = np.array(img)
         media_data.caption = values_dict['main_prompt']
         img_data.append(media_data)
@@ -1635,14 +1653,14 @@ def start_batch_process(*element_values):
     try:
         keys_to_pop = ['batch_process_folder', 'main_prompt', 'output_video_format',
                        'output_video_quality', 'outputs_folder', 'video_duration', 'video_end', 'video_fps',
-                       'video_height', 'video_start', 'video_width', 'src_file', 'ckpt_type']
+                       'video_height', 'video_start', 'video_width', 'src_file', 'ckpt_type', 'auto_unload_models']
 
         status_container.outputs_folder = values_dict['outputs_folder']
         values_dict['outputs_folder'] = values_dict['outputs_folder']
         status_container.process_params = values_dict
 
         values_dict = {k: v for k, v in values_dict.items() if k not in keys_to_pop}
-        result, _ = batch_process(img_data, **values_dict)
+        result, _ = batch_process(img_data, **values_dict, progress=progress)
     except Exception as e:
         print(f"An exception occurred: {e} at {traceback.format_exc()}")
         is_processing = False
@@ -2560,6 +2578,312 @@ def reset_processing_state():
     return "Processing state reset successfully.", batch_progress_display
 
 
+# ============================================================================
+# SUBPROCESS PROCESSING FUNCTIONS (Auto Unload Models feature)
+# ============================================================================
+
+def get_subprocess_temp_dir():
+    """Get or create a temporary directory for subprocess files."""
+    temp_dir = os.path.join(tempfile.gettempdir(), 'supir_subprocess')
+    os.makedirs(temp_dir, exist_ok=True)
+    return temp_dir
+
+
+def cleanup_subprocess_files(params_file, progress_file, results_file):
+    """Clean up temporary subprocess files."""
+    for f in [params_file, progress_file, results_file]:
+        try:
+            if f and os.path.exists(f):
+                os.remove(f)
+            # Also remove .tmp files
+            tmp_file = f + ".tmp" if f else None
+            if tmp_file and os.path.exists(tmp_file):
+                os.remove(tmp_file)
+        except Exception as e:
+            print(f"Warning: Could not remove temp file {f}: {e}")
+
+
+def read_subprocess_progress(progress_file):
+    """Read progress from subprocess progress file."""
+    try:
+        if os.path.exists(progress_file):
+            with open(progress_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        pass
+    return None
+
+
+def read_subprocess_results(results_file):
+    """Read results from subprocess results file."""
+    try:
+        if os.path.exists(results_file):
+            with open(results_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        print(f"Error reading results file: {e}")
+    return None
+
+
+def launch_subprocess_processing(params_dict, progress=None):
+    """
+    Launch processing in a subprocess for automatic memory cleanup.
+    
+    This function:
+    1. Saves parameters to a temp file
+    2. Launches subprocess_worker.py
+    3. Polls for progress updates
+    4. Returns results when complete
+    """
+    global is_processing, batch_total_count, batch_processed_count, batch_processing_times
+    global batch_current_stage, batch_start_time, batch_current_image_name
+    
+    temp_dir = get_subprocess_temp_dir()
+    timestamp = str(int(time.time() * 1000))
+    
+    params_file = os.path.join(temp_dir, f'params_{timestamp}.json')
+    progress_file = os.path.join(temp_dir, f'progress_{timestamp}.json')
+    results_file = os.path.join(temp_dir, f'results_{timestamp}.json')
+    
+    try:
+        # Save parameters to file
+        with open(params_file, 'w', encoding='utf-8') as f:
+            json.dump(params_dict, f)
+        
+        # Get the path to the subprocess worker script
+        worker_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'subprocess_worker.py')
+        
+        if not os.path.exists(worker_script):
+            return False, "Subprocess worker script not found. Please ensure subprocess_worker.py exists."
+        
+        # Build the command
+        python_exe = sys.executable
+        cmd = [
+            python_exe,
+            worker_script,
+            '--params', params_file,
+            '--progress', progress_file,
+            '--results', results_file
+        ]
+        
+        print(f"Launching subprocess: {' '.join(cmd)}")
+        
+        # Initialize batch tracking
+        batch_start_time = time.time()
+        batch_total_count = len(params_dict.get('image_paths', []))
+        batch_processed_count = 0
+        batch_processing_times = []
+        batch_current_stage = "Starting subprocess..."
+        is_processing = True
+        
+        # Launch subprocess
+        # Use CREATE_NO_WINDOW on Windows to prevent console window
+        startupinfo = None
+        creationflags = 0
+        if os.name == 'nt':  # Windows
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            creationflags = subprocess.CREATE_NO_WINDOW
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        )
+        
+        # Poll for progress updates
+        last_progress_time = time.time()
+        poll_interval = 0.5  # seconds
+        timeout_seconds = 7200  # 2 hours max
+        
+        while process.poll() is None and is_processing:
+            # Check for timeout
+            if time.time() - batch_start_time > timeout_seconds:
+                process.terminate()
+                return False, "Processing timed out after 2 hours."
+            
+            # Read progress
+            progress_data = read_subprocess_progress(progress_file)
+            if progress_data:
+                batch_current_stage = progress_data.get('description', 'Processing...')
+                batch_processed_count = progress_data.get('batch_processed', 0)
+                batch_total_count = progress_data.get('batch_total', batch_total_count)
+                
+                # Update Gradio progress if available
+                if progress is not None:
+                    progress_percent = progress_data.get('progress_percent', 0) / 100
+                    try:
+                        progress(progress_percent, desc=batch_current_stage)
+                    except:
+                        pass
+                
+                last_progress_time = time.time()
+            
+            time.sleep(poll_interval)
+        
+        # Check if cancelled
+        if not is_processing:
+            process.terminate()
+            cleanup_subprocess_files(params_file, progress_file, results_file)
+            return False, "Processing was cancelled."
+        
+        # Wait for process to complete
+        stdout, stderr = process.communicate(timeout=60)
+        
+        if process.returncode != 0:
+            error_msg = stderr.decode('utf-8', errors='replace') if stderr else "Unknown error"
+            print(f"Subprocess error: {error_msg}")
+            cleanup_subprocess_files(params_file, progress_file, results_file)
+            return False, f"Subprocess failed: {error_msg[:500]}"
+        
+        # Read results
+        results = read_subprocess_results(results_file)
+        
+        if results is None:
+            cleanup_subprocess_files(params_file, progress_file, results_file)
+            return False, "Failed to read results from subprocess."
+        
+        if not results.get('success', False):
+            error_msg = results.get('error', 'Unknown error')
+            cleanup_subprocess_files(params_file, progress_file, results_file)
+            return False, f"Processing failed: {error_msg}"
+        
+        # Cleanup temp files
+        cleanup_subprocess_files(params_file, progress_file, results_file)
+        
+        return True, results
+        
+    except Exception as e:
+        traceback.print_exc()
+        cleanup_subprocess_files(params_file, progress_file, results_file)
+        return False, f"Exception during subprocess processing: {str(e)}"
+    finally:
+        is_processing = False
+        batch_total_count = 0
+        batch_processed_count = 0
+
+
+def run_single_in_subprocess(values_dict, progress=None):
+    """Run single image processing in a subprocess."""
+    global status_container
+    
+    input_image = values_dict.get('src_file')
+    if input_image is None:
+        return "No input image provided.", hide_batch_progress()
+    
+    # Check if it's a video (subprocess mode doesn't support video yet)
+    if is_video(input_image):
+        return "Video processing is not supported in subprocess mode. Please disable 'Auto Unload Models' for video processing.", hide_batch_progress()
+    
+    # Prepare parameters for subprocess
+    params = prepare_subprocess_params(values_dict, [input_image])
+    
+    # Launch subprocess
+    success, result = launch_subprocess_processing(params, progress)
+    
+    if not success:
+        return result, hide_batch_progress()
+    
+    # Process results
+    results_list = result.get('results', [])
+    total_processed = result.get('total_processed', 0)
+    
+    # Update status container with results
+    if results_list:
+        output_paths = [r['output_path'] for r in results_list if r.get('output_path')]
+        if output_paths:
+            # Create media data for the slider
+            media_data = MediaData(media_path=input_image)
+            media_data.outputs = output_paths
+            media_data.caption = results_list[0].get('caption', '')
+            status_container.image_data = [media_data]
+    
+    end_time = time.time()
+    return f"Processing completed (subprocess mode): {total_processed} image(s) processed.", hide_batch_progress()
+
+
+def run_batch_in_subprocess(values_dict, image_files, progress=None):
+    """Run batch image processing in a subprocess."""
+    global status_container
+    
+    if not image_files:
+        return "No images to process.", hide_batch_progress()
+    
+    # Prepare parameters for subprocess
+    params = prepare_subprocess_params(values_dict, image_files)
+    
+    # Launch subprocess
+    success, result = launch_subprocess_processing(params, progress)
+    
+    if not success:
+        return result, hide_batch_progress()
+    
+    # Process results
+    results_list = result.get('results', [])
+    total_processed = result.get('total_processed', 0)
+    
+    # Update status container with results
+    output_data = []
+    for res in results_list:
+        media_data = MediaData(media_path=res.get('input_path', ''))
+        media_data.outputs = [res.get('output_path')] if res.get('output_path') else []
+        media_data.caption = res.get('caption', '')
+        output_data.append(media_data)
+    
+    status_container.image_data = output_data
+    
+    return f"Batch processing completed (subprocess mode): {total_processed} image(s) processed.", hide_batch_progress()
+
+
+def prepare_subprocess_params(values_dict, image_paths):
+    """Prepare parameters dictionary for subprocess worker."""
+    # Copy values_dict and add additional parameters
+    params = dict(values_dict)
+    
+    # Add image paths
+    params['image_paths'] = image_paths
+    
+    # Add directory paths
+    params['ckpt_dir'] = args.ckpt_dir
+    params['lora_dir'] = args.lora_dir
+    
+    # Add runtime arguments that subprocess needs
+    params['loading_half_params'] = args.loading_half_params
+    params['fp8'] = args.fp8
+    params['fast_load_sd'] = args.fast_load_sd
+    params['use_tile_vae'] = args.use_tile_vae
+    params['use_fast_tile'] = args.use_fast_tile
+    params['encoder_tile_size'] = args.encoder_tile_size
+    params['decoder_tile_size'] = args.decoder_tile_size
+    params['load_8bit_llava'] = args.load_8bit_llava
+    params['load_4bit_llava'] = args.load_4bit_llava
+    
+    # Set outputs folder
+    if not params.get('outputs_folder') or len(params.get('outputs_folder', '')) < 2:
+        params['outputs_folder'] = args.outputs_folder
+    
+    # Remove non-serializable items
+    params.pop('src_file', None)
+    params.pop('batch_process_folder', None)
+    
+    # Ensure all values are JSON serializable
+    for key in list(params.keys()):
+        value = params[key]
+        if value is None:
+            continue
+        # Convert numpy types to Python types
+        if hasattr(value, 'item'):
+            params[key] = value.item()
+        elif not isinstance(value, (str, int, float, bool, list, dict, type(None))):
+            params[key] = str(value)
+    
+    return params
+
+
 def load_and_reset(param_setting):
     e_steps = 50  # steps
     sstage2 = 1  # Stage2 Guidance Strength
@@ -2860,7 +3184,7 @@ with (block):
     
     # END CHANGE
 
-    gr.Markdown("SUPIR V100 - https://www.patreon.com/posts/99176057")
+    gr.Markdown("SUPIR V101 - https://www.patreon.com/posts/99176057")
     
     def do_nothing():
         pass
@@ -2872,7 +3196,11 @@ with (block):
                 start_single_button = gr.Button(value="Process Single")
                 start_batch_button = gr.Button(value="Process Batch")
                 stop_batch_button = gr.Button(value="Cancel")
-                reset_state_button = gr.Button(value="Reset State", variant="secondary")
+                auto_unload_models_checkbox = gr.Checkbox(
+                    label="Auto Unload Models", 
+                    value=False,
+                    info="Run in subprocess for full GPU memory cleanup after processing."
+                )
                 btn_open_outputs = gr.Button("Open Outputs Folder")
                 btn_open_outputs.click(fn=open_folder)
 
@@ -3175,14 +3503,41 @@ with (block):
                             print(f"Error loading preset: {str(e)}")
                             return [f"Error loading preset: {str(e)}"] + [gr.update() for _ in range(len(elements_dict) + len(extra_info_elements))]
 
+                        # Define default values for elements that should be reset when missing from preset
+                        # This ensures checkboxes and other elements have consistent behavior
+                        element_defaults = {
+                            "auto_unload_models": False,
+                            "auto_unload_llava": False,
+                            "apply_llava": False,
+                            "apply_supir": True,
+                            "apply_face": False,
+                            "apply_face_only": False,
+                            "apply_bg": False,
+                            "random_seed": True,
+                            "save_captions": True,
+                            "make_comparison_video": False,
+                            "linear_CFG": True,
+                            "linear_s_stage2": False,
+                            "first_downscale": False,
+                            "skip_llava_if_txt_exists": True,
+                            "skip_existing_images": True,
+                            "cache_base_model": False,
+                        }
+
                         # Create default updates (no change) for all elements
                         all_updates = []
                         # Clear the message after a short delay instead of keeping it permanent
                         all_updates.append(gr.update(value=""))  # First update is the output message
                         
-                        # Add updates for elements_dict
-                        for _ in elements_dict:
-                            all_updates.append(gr.update())
+                        # Add updates for elements_dict - use defaults for missing keys
+                        for key in elements_dict.keys():
+                            if key in config:
+                                all_updates.append(gr.update())  # Will be set below
+                            elif key in element_defaults:
+                                # Use default value for missing keys that have defaults defined
+                                all_updates.append(gr.update(value=element_defaults[key]))
+                            else:
+                                all_updates.append(gr.update())  # No change for other elements
                         
                         # Add updates for extra_info_elements
                         for _ in extra_info_elements:
@@ -3462,6 +3817,7 @@ with (block):
         "apply_llava": apply_llava_checkbox,
         "apply_supir": apply_supir_checkbox,
         "auto_unload_llava": auto_unload_llava_checkbox,
+        "auto_unload_models": auto_unload_models_checkbox,
         "batch_process_folder": batch_process_folder_textbox,
         "ckpt_select": ckpt_select_dropdown,
         "color_fix_type": color_fix_type_radio,
@@ -3549,7 +3905,6 @@ with (block):
         fn=start_batch_process, inputs=elements, outputs=[output_label, batch_progress_html],
         show_progress=True, queue=True)
     stop_batch_button.click(fn=stop_batch_upscale, outputs=[output_label, batch_progress_html], show_progress=True, queue=True)
-    reset_state_button.click(fn=reset_processing_state, outputs=[output_label, batch_progress_html], show_progress=False, queue=False)
     reset_button.click(fn=load_and_reset, inputs=[param_setting_select],
                        outputs=[edm_steps_slider, s_cfg_slider, s_stage2_slider, s_stage1_slider, s_churn_slider,
                                 s_noise_slider, a_prompt_textbox, n_prompt_textbox,
